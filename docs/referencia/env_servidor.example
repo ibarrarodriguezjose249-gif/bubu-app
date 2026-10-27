@@ -1,0 +1,8 @@
+# Ejemplo únicamente. Nunca pegues claves reales en el código móvil ni publiques este archivo con secretos.
+DATABASE_URL=
+AUTH_SECRET=
+PAYMENT_PROVIDER_SECRET_KEY=
+PAYMENT_WEBHOOK_SECRET=
+MAPS_API_KEY=
+FILE_STORAGE_BUCKET=
+APP_BASE_URL=http://localhost:3000

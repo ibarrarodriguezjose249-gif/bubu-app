@@ -1,0 +1,395 @@
+rules_version = '2';
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  BÜBÜ — Reglas de seguridad de Cloud Firestore (proyecto bubi-246b8)
+//
+//  Principios:
+//   • Todo lo que no está permitido aquí, está PROHIBIDO (deny by default).
+//   • Solo el catálogo (categorías y zonas) es de lectura pública; no tiene
+//     datos personales. Todo lo demás exige sesión iniciada.
+//   • Nadie se puede dar permisos de admin: la colección `admins` solo se
+//     escribe desde la consola de Firebase (que no pasa por estas reglas).
+//   • Un proveedor no se puede aprobar solo; solo un admin cambia su estado.
+//   • Un proveedor no aprobado no publica servicios ni recibe pedidos.
+//   • Los pedidos solo los ven el cliente, el proveedor y los admins, y su
+//     estado solo avanza por las transiciones permitidas.
+//   • No hay pagos: `priceEstimate` / `priceFrom` son solo informativos.
+//
+//  La tabla de transiciones de pedidos está duplicada en
+//  mobile/src/constants/orderStatus.js. Si cambias una, cambia la otra.
+// ═══════════════════════════════════════════════════════════════════════════
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ───────────── Utilidades ─────────────
+    function signedIn() { return request.auth != null; }
+    function me() { return request.auth.uid; }
+
+    function isAdmin() {
+      return signedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    function isActiveUser() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'active';
+    }
+
+    function providerData(id) {
+      return get(/databases/$(database)/documents/providers/$(id)).data;
+    }
+
+    function isApprovedProviderId(id) {
+      return exists(/databases/$(database)/documents/providers/$(id))
+        && providerData(id).status == 'approved';
+    }
+
+    function isApprovedProvider() {
+      return signedIn() && isApprovedProviderId(request.auth.uid);
+    }
+
+    function zoneActive(zoneId) {
+      return zoneId is string
+        && exists(/databases/$(database)/documents/zones/$(zoneId))
+        && get(/databases/$(database)/documents/zones/$(zoneId)).data.active == true;
+    }
+
+    function categoryActive(categoryId) {
+      return categoryId is string
+        && exists(/databases/$(database)/documents/categories/$(categoryId))
+        && get(/databases/$(database)/documents/categories/$(categoryId)).data.active == true;
+    }
+
+    function changedKeys() { return request.resource.data.diff(resource.data).affectedKeys(); }
+
+    function isStr(v, minLen, maxLen) { return v is string && v.size() >= minLen && v.size() <= maxLen; }
+    function optStr(d, key, maxLen) { return !(key in d) || isStr(d[key], 0, maxLen); }
+    function isPrice(v) { return v is number && v >= 0 && v <= 100000; }
+    function isModeList(v) {
+      return v is list && v.size() >= 1 && v.size() <= 2 && v.hasOnly(['dropoff', 'pickup_delivery']);
+    }
+    function isIdList(v, maxItems) {
+      return v is list && v.size() >= 1 && v.size() <= maxItems;
+    }
+    function updatedNowIfPresent(d) { return !('updatedAt' in d) || d.updatedAt == request.time; }
+
+    // ───────────── Administradores ─────────────
+    // Se crean A MANO en la consola: admins/{UID} con { role: 'superadmin' }.
+    match /admins/{adminId} {
+      allow get: if signedIn() && (me() == adminId || isAdmin());
+      allow list: if isAdmin();
+      allow write: if false;
+    }
+
+    // ───────────── Usuarios ─────────────
+    function validUserCreate(d) {
+      return d.keys().hasOnly(['displayName', 'email', 'phone', 'colonia', 'zoneId', 'activeMode', 'status', 'createdAt', 'updatedAt'])
+        && d.keys().hasAll(['displayName', 'email', 'activeMode', 'status', 'createdAt'])
+        && isStr(d.displayName, 1, 80)
+        && request.auth.token.email is string
+        && d.email == request.auth.token.email.lower()
+        && optStr(d, 'phone', 20)
+        && optStr(d, 'colonia', 80)
+        && optStr(d, 'zoneId', 60)
+        && d.activeMode == 'client'
+        && d.status == 'active'
+        && d.createdAt == request.time
+        && updatedNowIfPresent(d);
+    }
+
+    function validSelfUserUpdate() {
+      let d = request.resource.data;
+      return resource.data.status == 'active'
+        && changedKeys().hasOnly(['displayName', 'phone', 'colonia', 'zoneId', 'activeMode', 'updatedAt'])
+        && isStr(d.displayName, 1, 80)
+        && optStr(d, 'phone', 20)
+        && optStr(d, 'colonia', 80)
+        && optStr(d, 'zoneId', 60)
+        && d.activeMode in ['client', 'provider']
+        && updatedNowIfPresent(d);
+    }
+
+    function validAdminUserUpdate() {
+      return changedKeys().hasOnly(['status', 'statusNote', 'updatedAt'])
+        && request.resource.data.status in ['active', 'suspended']
+        && optStr(request.resource.data, 'statusNote', 300);
+    }
+
+    match /users/{userId} {
+      allow get: if signedIn() && (me() == userId || isAdmin());
+      allow list: if isAdmin();
+      allow create: if signedIn() && me() == userId && validUserCreate(request.resource.data);
+      allow update: if signedIn() && (
+        (me() == userId && validSelfUserUpdate())
+        || (isAdmin() && validAdminUserUpdate())
+      );
+      allow delete: if false;
+    }
+
+    // ───────────── Proveedores (id del documento = UID) ─────────────
+    function validProviderFields(d) {
+      return isStr(d.businessName, 2, 80)
+        && optStr(d, 'description', 500)
+        && isIdList(d.categoryIds, 10)
+        && isIdList(d.zoneIds, 5)
+        && isModeList(d.fulfillmentModes);
+    }
+
+    function validProviderCreate(d) {
+      return d.keys().hasOnly(['businessName', 'description', 'categoryIds', 'zoneIds', 'fulfillmentModes', 'status', 'reviewNote', 'createdAt', 'updatedAt'])
+        && validProviderFields(d)
+        && categoryActive(d.categoryIds[0])
+        && zoneActive(d.zoneIds[0])
+        && d.status == 'pending'
+        && (!('reviewNote' in d) || d.reviewNote == '')
+        && d.createdAt == request.time
+        && updatedNowIfPresent(d);
+    }
+
+    function validProviderSelfUpdate() {
+      let d = request.resource.data;
+      let old = resource.data;
+      return old.status != 'suspended'
+        && changedKeys().hasOnly(['businessName', 'description', 'categoryIds', 'zoneIds', 'fulfillmentModes', 'status', 'updatedAt'])
+        && validProviderFields(d)
+        // El estado no cambia, salvo reenviar una solicitud rechazada.
+        && (d.status == old.status || (old.status == 'rejected' && d.status == 'pending'))
+        && updatedNowIfPresent(d);
+    }
+
+    function validProviderAdminUpdate() {
+      let d = request.resource.data;
+      return changedKeys().hasOnly(['status', 'reviewNote', 'reviewedAt', 'reviewedBy', 'updatedAt'])
+        && d.status in ['pending', 'approved', 'rejected', 'suspended']
+        && optStr(d, 'reviewNote', 300)
+        && (!('reviewedBy' in changedKeys()) || d.reviewedBy == me());
+    }
+
+    match /providers/{providerId} {
+      // Perfil aprobado: visible para usuarios con sesión. Pendiente/rechazado: solo dueño y admin.
+      allow get: if signedIn() && (me() == providerId || resource.data.status == 'approved' || isAdmin());
+      allow list: if signedIn() && (resource.data.status == 'approved' || isAdmin());
+      allow create: if isActiveUser() && me() == providerId && validProviderCreate(request.resource.data);
+      allow update: if signedIn() && (
+        (me() == providerId && isActiveUser() && validProviderSelfUpdate())
+        || (isAdmin() && validProviderAdminUpdate())
+      );
+      allow delete: if false;
+    }
+
+    // ───────────── Catálogo: categorías y zonas (lectura pública) ─────────────
+    match /categories/{categoryId} {
+      allow read: if true;
+      allow create, update: if isAdmin()
+        && isStr(request.resource.data.name, 2, 60)
+        && request.resource.data.active is bool
+        && optStr(request.resource.data, 'icon', 16)
+        && optStr(request.resource.data, 'description', 200);
+      allow delete: if isAdmin();
+    }
+
+    match /zones/{zoneId} {
+      allow read: if true;
+      allow create, update: if isAdmin()
+        && isStr(request.resource.data.name, 2, 80)
+        && request.resource.data.active is bool
+        && (!('colonias' in request.resource.data) || (request.resource.data.colonias is list && request.resource.data.colonias.size() <= 300));
+      allow delete: if isAdmin();
+    }
+
+    // ───────────── Servicios publicados por proveedores ─────────────
+    function validService(d) {
+      return d.keys().hasOnly(['providerId', 'providerName', 'categoryId', 'zoneIds', 'title', 'description', 'priceFrom', 'priceUnit', 'fulfillmentModes', 'active', 'createdAt', 'updatedAt'])
+        && d.providerId == me()
+        && isStr(d.providerName, 1, 80)
+        && isStr(d.title, 3, 80)
+        && optStr(d, 'description', 500)
+        && isPrice(d.priceFrom)
+        && isStr(d.priceUnit, 1, 30)
+        && isIdList(d.zoneIds, 5)
+        && isModeList(d.fulfillmentModes)
+        && d.active is bool
+        && d.categoryId in providerData(me()).categoryIds
+        && updatedNowIfPresent(d);
+    }
+
+    match /services/{serviceId} {
+      allow get, list: if signedIn() && (resource.data.active == true || resource.data.providerId == me() || isAdmin());
+      allow create: if isApprovedProvider()
+        && validService(request.resource.data)
+        && request.resource.data.createdAt == request.time;
+      allow update: if signedIn() && (
+        (resource.data.providerId == me() && isApprovedProvider()
+          && validService(request.resource.data)
+          && request.resource.data.createdAt == resource.data.createdAt)
+        || (isAdmin() && changedKeys().hasOnly(['active', 'updatedAt']))
+      );
+      allow delete: if signedIn() && (resource.data.providerId == me() || isAdmin());
+    }
+
+    // ───────────── Solicitudes abiertas ("no encuentro lo que busco") ─────────────
+    function validRequestCreate(d) {
+      return d.keys().hasOnly(['customerId', 'customerName', 'categoryId', 'zoneId', 'colonia', 'description', 'fulfillmentMode', 'preferredDate', 'status', 'createdAt', 'updatedAt'])
+        && d.customerId == me()
+        && isStr(d.customerName, 1, 80)
+        && categoryActive(d.categoryId)
+        && zoneActive(d.zoneId)
+        && isStr(d.colonia, 1, 80)
+        && isStr(d.description, 5, 500)
+        && d.fulfillmentMode in ['dropoff', 'pickup_delivery']
+        && (!('preferredDate' in d) || d.preferredDate is timestamp)
+        && d.status == 'open'
+        && d.createdAt == request.time
+        && updatedNowIfPresent(d);
+    }
+
+    function providerCanSeeRequest(r) {
+      // Ojo: para consultas (list), cada condición debe estar garantizada por
+      // los filtros de la consulta (status, categoryId y zoneId con ==).
+      return isApprovedProvider()
+        && r.status == 'open'
+        && r.categoryId in providerData(me()).categoryIds
+        && r.zoneId in providerData(me()).zoneIds;
+    }
+
+    match /requests/{requestId} {
+      allow get, list: if signedIn() && (resource.data.customerId == me() || providerCanSeeRequest(resource.data) || isAdmin());
+      allow create: if isActiveUser() && validRequestCreate(request.resource.data);
+      allow update: if signedIn() && (
+        (resource.data.customerId == me()
+          && resource.data.status == 'open'
+          && changedKeys().hasOnly(['status', 'updatedAt'])
+          && request.resource.data.status in ['closed', 'cancelled'])
+        || (isAdmin() && changedKeys().hasOnly(['status', 'updatedAt'])
+          && request.resource.data.status in ['open', 'closed', 'cancelled'])
+      );
+      allow delete: if false;
+
+      // Ofertas de proveedores a una solicitud (id = UID del proveedor).
+      function parentRequest() {
+        return get(/databases/$(database)/documents/requests/$(requestId)).data;
+      }
+
+      match /offers/{offerProviderId} {
+        allow get: if signedIn() && (offerProviderId == me() || parentRequest().customerId == me() || isAdmin());
+        allow list: if signedIn() && (parentRequest().customerId == me() || isAdmin());
+        allow create: if isApprovedProvider()
+          && offerProviderId == me()
+          && parentRequest().status == 'open'
+          && parentRequest().customerId != me()
+          && request.resource.data.keys().hasOnly(['providerId', 'providerName', 'message', 'priceFrom', 'createdAt', 'updatedAt'])
+          && request.resource.data.providerId == me()
+          && isStr(request.resource.data.providerName, 1, 80)
+          && isStr(request.resource.data.message, 1, 500)
+          && (!('priceFrom' in request.resource.data) || isPrice(request.resource.data.priceFrom))
+          && request.resource.data.createdAt == request.time;
+        allow update: if signedIn() && offerProviderId == me()
+          && parentRequest().status == 'open'
+          && changedKeys().hasOnly(['message', 'priceFrom', 'updatedAt'])
+          && isStr(request.resource.data.message, 1, 500)
+          && (!('priceFrom' in request.resource.data) || isPrice(request.resource.data.priceFrom));
+        allow delete: if signedIn() && (offerProviderId == me() || isAdmin());
+      }
+    }
+
+    // ───────────── Pedidos y reservas ─────────────
+    // Reserva = pedido con `scheduledAt` (fecha acordada). Mismo flujo de estados.
+    function providerNext() {
+      return {
+        'requested': ['accepted', 'rejected'],
+        'accepted': ['in_progress', 'cancelled'],
+        'in_progress': ['ready'],
+        'ready': ['delivered']
+      };
+    }
+    function customerNext() {
+      return {
+        'requested': ['cancelled'],
+        'accepted': ['cancelled']
+      };
+    }
+    function allStatuses() {
+      return ['requested', 'accepted', 'rejected', 'in_progress', 'ready', 'delivered', 'cancelled', 'disputed'];
+    }
+
+    function validOrderCreate(d) {
+      return d.keys().hasOnly(['customerId', 'providerId', 'serviceId', 'requestId', 'categoryId', 'zoneId', 'customerName', 'providerName', 'details', 'fulfillmentMode', 'colonia', 'address', 'customerPhone', 'scheduledAt', 'priceEstimate', 'status', 'createdAt', 'updatedAt', 'statusChangedAt'])
+        && d.keys().hasAll(['customerId', 'providerId', 'categoryId', 'zoneId', 'customerName', 'details', 'fulfillmentMode', 'colonia', 'status', 'createdAt'])
+        && d.customerId == me()
+        && d.providerId is string
+        && d.providerId != me()
+        && isApprovedProviderId(d.providerId)
+        && d.categoryId in providerData(d.providerId).categoryIds
+        && d.zoneId in providerData(d.providerId).zoneIds
+        && d.fulfillmentMode in providerData(d.providerId).fulfillmentModes
+        && zoneActive(d.zoneId)
+        && isStr(d.customerName, 1, 80)
+        && optStr(d, 'providerName', 80)
+        && isStr(d.details, 3, 1000)
+        && isStr(d.colonia, 1, 80)
+        // Domicilio obligatorio solo si el proveedor pasa a recoger.
+        && (d.fulfillmentMode == 'pickup_delivery' ? isStr(d.address, 5, 200) : optStr(d, 'address', 200))
+        && optStr(d, 'customerPhone', 20)
+        && (!('scheduledAt' in d) || (d.scheduledAt is timestamp && d.scheduledAt > request.time))
+        && (!('priceEstimate' in d) || isPrice(d.priceEstimate))
+        && optStr(d, 'requestId', 128)
+        && (!('serviceId' in d) || (
+              exists(/databases/$(database)/documents/services/$(d.serviceId))
+              && get(/databases/$(database)/documents/services/$(d.serviceId)).data.providerId == d.providerId
+              && get(/databases/$(database)/documents/services/$(d.serviceId)).data.active == true))
+        && d.status == 'requested'
+        && d.createdAt == request.time
+        && updatedNowIfPresent(d);
+    }
+
+    function providerOrderUpdate() {
+      let d = request.resource.data;
+      let old = resource.data;
+      return old.providerId == me()
+        && changedKeys().hasOnly(['status', 'statusChangedAt', 'updatedAt', 'providerPhone', 'cancelReason'])
+        && old.status in providerNext()
+        && d.status in providerNext()[old.status]
+        && d.statusChangedAt == request.time
+        && optStr(d, 'providerPhone', 20)
+        && optStr(d, 'cancelReason', 300);
+    }
+
+    function customerOrderUpdate() {
+      let d = request.resource.data;
+      let old = resource.data;
+      return old.customerId == me()
+        && changedKeys().hasOnly(['status', 'statusChangedAt', 'updatedAt', 'cancelReason'])
+        && old.status in customerNext()
+        && d.status in customerNext()[old.status]
+        && d.statusChangedAt == request.time
+        && optStr(d, 'cancelReason', 300);
+    }
+
+    function adminOrderUpdate() {
+      return isAdmin()
+        && changedKeys().hasOnly(['status', 'statusChangedAt', 'updatedAt', 'adminNote'])
+        && request.resource.data.status in allStatuses()
+        && optStr(request.resource.data, 'adminNote', 500);
+    }
+
+    match /orders/{orderId} {
+      allow get, list: if signedIn() && (resource.data.customerId == me() || resource.data.providerId == me() || isAdmin());
+      allow create: if isActiveUser() && validOrderCreate(request.resource.data);
+      allow update: if signedIn() && (providerOrderUpdate() || customerOrderUpdate() || adminOrderUpdate());
+      allow delete: if false;
+    }
+
+    // ───────────── Bitácora administrativa (solo agregar) ─────────────
+    match /auditLog/{entryId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin()
+        && request.resource.data.keys().hasOnly(['adminId', 'action', 'targetType', 'targetId', 'details', 'createdAt'])
+        && request.resource.data.adminId == me()
+        && isStr(request.resource.data.action, 1, 60)
+        && isStr(request.resource.data.targetType, 1, 40)
+        && request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
+    }
+  }
+}

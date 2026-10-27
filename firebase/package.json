@@ -1,0 +1,21 @@
+{
+  "name": "bubu-firebase",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Reglas de Firestore de BÜBÜ y sus pruebas con el emulador local",
+  "scripts": {
+    "test:rules": "firebase emulators:exec --only firestore --project demo-bubu \"node --test tests/rules.test.js\"",
+    "emulators": "firebase emulators:start --project demo-bubu",
+    "deploy:rules": "firebase deploy --only firestore:rules --project bubi-246b8"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "latest",
+    "firebase": "latest",
+    "firebase-tools": "latest"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "//": "Versiones 'latest' a propósito: no se pudieron verificar desde la sesión de desarrollo. Tras 'npm install' quedan fijadas en package-lock.json."
+}
