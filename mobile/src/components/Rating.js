@@ -1,7 +1,7 @@
 // Estrellas: insignia de promedio, selector de 1 a 5 y lista corta de reseñas.
 import React, { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { colors } from '../constants/brand';
+import { colors, fonts } from '../constants/brand';
 import { timeAgo } from '../lib/time';
 
 const GOLD = '#f5a623';
@@ -9,7 +9,7 @@ const GOLD = '#f5a623';
 export function Stars({ value = 0, size = 14 }) {
   const full = Math.round(value);
   return (
-    <Text style={{ fontSize: size, color: GOLD, letterSpacing: 1 }} accessibilityLabel={`${value} de 5 estrellas`}>
+    <Text style={{ fontFamily: fonts.regular, fontSize: size, color: GOLD, letterSpacing: 1 }} accessibilityLabel={`${value} de 5 estrellas`}>
       {'★'.repeat(full)}<Text style={{ color: '#d5dbe6' }}>{'★'.repeat(5 - full)}</Text>
     </Text>
   );
@@ -18,7 +18,7 @@ export function Stars({ value = 0, size = 14 }) {
 // "⭐ 4.8 (12)" o "Nuevo" si aún no tiene reseñas reales.
 export function RatingBadge({ summary, style }) {
   if (!summary) {
-    return <Text style={[s.badge, s.badgeNew, style]}>✨ Nuevo</Text>;
+    return <Text style={[s.badge, s.badgeNew, style]}>Nuevo en BÜBÜ</Text>;
   }
   return (
     <Text style={[s.badge, style]} accessibilityLabel={`${summary.avg} estrellas, ${summary.count} reseñas`}>
@@ -68,13 +68,13 @@ export function ReviewList({ reviews, max = 2, now }) {
 }
 
 const s = StyleSheet.create({
-  badge: { fontSize: 13, fontWeight: '800', color: colors.ink, backgroundColor: '#fff6e5', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 20, overflow: 'hidden', alignSelf: 'flex-start' },
-  badgeNew: { backgroundColor: '#eaf2ff', color: colors.blue, fontSize: 12 },
-  count: { color: colors.muted, fontWeight: '600' },
+  badge: { fontSize: 13, fontFamily: fonts.extra, color: colors.ink, backgroundColor: '#fff6e5', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 20, overflow: 'hidden', alignSelf: 'flex-start' },
+  badgeNew: { fontFamily: fonts.bold, backgroundColor: '#eaf2ff', color: colors.blue, fontSize: 12 },
+  count: { color: colors.muted, fontFamily: fonts.semibold },
   picker: { flexDirection: 'row', justifyContent: 'center', gap: 8, marginVertical: 8 },
-  pickStar: { fontSize: 40 },
+  pickStar: { fontFamily: fonts.regular, fontSize: 40 },
   review: { backgroundColor: '#f7f9fd', borderRadius: 12, padding: 10, marginTop: 6 },
-  who: { fontSize: 12, color: colors.muted },
-  comment: { fontSize: 13, color: colors.ink, marginTop: 4, lineHeight: 18 },
-  more: { fontSize: 13, color: colors.blue, fontWeight: '800', marginTop: 8 },
+  who: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted },
+  comment: { fontFamily: fonts.regular, fontSize: 13, color: colors.ink, marginTop: 4, lineHeight: 18 },
+  more: { fontSize: 13, color: colors.blue, fontFamily: fonts.extra, marginTop: 8 },
 });

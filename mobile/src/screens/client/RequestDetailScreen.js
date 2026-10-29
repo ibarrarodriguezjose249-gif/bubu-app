@@ -1,13 +1,14 @@
 // Detalle de un pedido publicado: contador, ofertas en vivo y elegir la favorita.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, Vibration, View } from 'react-native';
-import { Badge, Button, Card, Field, Loading, Notice, Screen, styles } from '../../components/ui';
+import { Badge, Button, Card, Field, IconLine, Loading, Notice, Screen, styles } from '../../components/ui';
+import Icon from '../../components/Icon';
 import { OfferCard } from '../../components/cards';
 import Radar from '../../components/Radar';
 import { subscribeReviewsFor } from '../../services/reviews';
 import { isOnline, subscribeApprovedProviders } from '../../services/providers';
 import { useAuth } from '../../context/AuthContext';
-import { colors } from '../../constants/brand';
+import { colors, fonts } from '../../constants/brand';
 import { FULFILLMENT_MODES } from '../../constants/catalog';
 import { REQUEST_STATE } from '../../constants/requests';
 import { cancelRequest, chooseOffer, republishRequest, requestState, requestSummary, subscribeOffers, subscribeRequest } from '../../services/requests';
@@ -20,11 +21,11 @@ function tagsFor(offers) {
   const priced = offers.filter((o) => typeof o.priceFrom === 'number');
   if (priced.length > 1) {
     const min = Math.min(...priced.map((o) => o.priceFrom));
-    priced.filter((o) => o.priceFrom === min).forEach((o) => { (tags[o.id] = tags[o.id] || []).push('💰 Mejor precio'); });
+    priced.filter((o) => o.priceFrom === min).forEach((o) => { (tags[o.id] = tags[o.id] || []).push({ icon: 'cash-outline', label: 'Mejor precio' }); });
   }
   if (offers.length > 1) {
     const first = offers.reduce((a, b) => (toMillis(a.createdAt) <= toMillis(b.createdAt) ? a : b));
-    (tags[first.id] = tags[first.id] || []).push('⚡ Respondió primero');
+    (tags[first.id] = tags[first.id] || []).push({ icon: 'flash-outline', label: 'Respondió primero' });
   }
   return tags;
 }
@@ -107,7 +108,7 @@ export default function RequestDetailScreen({ navigation, route }) {
     <Screen>
       <View style={styles.row}>
         <Badge tone={st.tone}>{st.label}</Badge>
-        {state === 'open' && <Text style={s.timer}>⏱ {countdown(request.expiresAt, now)}</Text>}
+        {state === 'open' && <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}><Icon name="time-outline" size={17} color={colors.blue} /><Text style={s.timer}>{countdown(request.expiresAt, now)}</Text></View>}
       </View>
       {justCreated && state === 'open' && offers.length === 0 && (
         <Notice tone="success">¡Listo! Tu pedido ya lo ven las lavanderías disponibles de tu zona. Las ofertas aparecen aquí solas.</Notice>
@@ -115,12 +116,12 @@ export default function RequestDetailScreen({ navigation, route }) {
 
       <Card>
         <Text style={styles.section}>{requestSummary(request)}</Text>
-        <Text style={styles.muted}>📍 {request.colonia} · {FULFILLMENT_MODES[request.fulfillmentMode]?.label}{request.whenText ? ` · ${request.whenText}` : ''}</Text>
+        <IconLine icon="location-outline">{request.colonia} · {FULFILLMENT_MODES[request.fulfillmentMode]?.label}{request.whenText ? ` · ${request.whenText}` : ''}</IconLine>
       </Card>
 
       {state === 'assigned' && (
         <Card>
-          <Text style={styles.section}>✅ Ya elegiste</Text>
+          <Text style={styles.section}>Ya elegiste</Text>
           <Text style={styles.muted}>Tu pedido está con {offers.find((o) => o.id === request.chosenProviderId)?.providerName || 'la lavandería elegida'}.</Text>
           <Button title="Ver mi pedido" onPress={() => navigation.navigate('OrderDetail', { id: request.orderId })} />
         </Card>
@@ -137,7 +138,7 @@ export default function RequestDetailScreen({ navigation, route }) {
             {offers.length === 0 && <Radar size={190} />}
             <Text style={s.radarTitle}>{offers.length === 0 ? 'Buscando lavanderías cerca de ti…' : 'Siguen llegando ofertas…'}</Text>
             <Text style={s.radarText}>
-              {online > 0 ? `🟢 ${online} ${online === 1 ? 'conectada' : 'conectadas'} ahora en tu zona` : 'Ahora no hay lavanderías conectadas; tu pedido les aparecerá en cuanto se conecten.'}
+              {online > 0 ? `${online} ${online === 1 ? 'conectada' : 'conectadas'} ahora en tu zona` : 'Ahora no hay lavanderías conectadas; tu pedido les aparecerá en cuanto se conecten.'}
             </Text>
             {offers.length === 0 && <Text style={s.radarHint}>Puedes cerrar esta pantalla: tus ofertas te esperan en Pedidos.</Text>}
           </View>
@@ -192,12 +193,12 @@ export default function RequestDetailScreen({ navigation, route }) {
 }
 
 const s = StyleSheet.create({
-  timer: { fontSize: 16, fontWeight: '900', color: colors.blue },
+  timer: { fontSize: 16, fontFamily: fonts.black, color: colors.blue },
   radarBox: { marginTop: 12, paddingVertical: 22, paddingHorizontal: 18, borderRadius: 22, backgroundColor: colors.navy, alignItems: 'center', overflow: 'hidden' },
   radarSmall: { paddingVertical: 14 },
-  radarTitle: { fontSize: 17, fontWeight: '900', color: colors.white, marginTop: 6, textAlign: 'center' },
-  radarText: { fontSize: 13, color: '#cfe9ff', marginTop: 6, textAlign: 'center', lineHeight: 19 },
-  radarHint: { fontSize: 12, color: '#8fa9cc', marginTop: 8, textAlign: 'center' },
+  radarTitle: { fontSize: 17, fontFamily: fonts.black, color: colors.white, marginTop: 6, textAlign: 'center' },
+  radarText: { fontFamily: fonts.regular, fontSize: 13, color: '#cfe9ff', marginTop: 6, textAlign: 'center', lineHeight: 19 },
+  radarHint: { fontFamily: fonts.regular, fontSize: 12, color: '#8fa9cc', marginTop: 8, textAlign: 'center' },
   bg: { flex: 1, backgroundColor: '#06142ab0', alignItems: 'center', justifyContent: 'center', padding: 16 },
   modal: { backgroundColor: colors.white, borderRadius: 20, padding: 22, width: '100%', maxWidth: 480 },
 });

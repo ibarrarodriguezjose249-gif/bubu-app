@@ -1,52 +1,61 @@
-// Pantalla pública de inicio (sin sesión). Conserva el diseño de la versión 0.
-import React, { useState } from 'react';
-import { ScrollView, Text, View } from 'react-native';
+// Bienvenida (sin sesión): logo, lema y accesos. Si ya hay sesión activa,
+// RootNavigator entra directo a la app y esta pantalla no se muestra.
+import React from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Hero from '../../components/Hero';
-import CategoryList from '../../components/CategoryList';
-import { Button, Card, Notice, styles } from '../../components/ui';
-import { useCatalog } from '../../context/CatalogContext';
-import { BRAND_NAME, colors } from '../../constants/brand';
+import { Button } from '../../components/ui';
+import Icon from '../../components/Icon';
+import { BRAND_NAME, BRAND_SLOGAN, LAUNCH_ZONE_LABEL, colors, fonts } from '../../constants/brand';
 
 export default function WelcomeScreen({ navigation }) {
-  const { categories, loading, error } = useCatalog();
-  const [search, setSearch] = useState('');
-  const [notice, setNotice] = useState('');
-  const q = search.trim().toLowerCase();
-  const filtered = categories.filter((c) => `${c.name} ${c.description || ''}`.toLowerCase().includes(q));
-
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.blue }} edges={['top']}>
-      <ScrollView style={{ backgroundColor: colors.bg }} contentContainerStyle={{ paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
-        <Hero
-          title="Lo que necesitas, cerca de ti."
-          intro="Encuentra servicios de confianza en tu zona. Comenzamos con lavanderías en General Zuazua."
-          search={search}
-          onSearch={setSearch}
-        />
-        <View style={styles.page}>
-          <Text style={styles.section}>¿Qué necesitas hoy?</Text>
-          <Text style={[styles.muted, { marginBottom: 14 }]}>Explora las categorías disponibles</Text>
-          {loading && <Text style={styles.muted}>Cargando categorías…</Text>}
-          {!!error && <Notice tone="error">No se pudieron cargar las categorías. Revisa tu conexión o la configuración de Firebase.</Notice>}
-          {!loading && !error && categories.length === 0 && (
-            <Notice tone="warn">Todavía no hay categorías cargadas. Un administrador debe cargar el catálogo inicial.</Notice>
-          )}
-          <CategoryList
-            categories={filtered}
-            onPress={(c) => setNotice(c.active ? `Crea una cuenta o inicia sesión para pedir ${c.name.toLowerCase()}.` : `${c.name} estará disponible próximamente.`)}
-          />
-          <Notice tone="success">{notice}</Notice>
+    <SafeAreaView style={s.safe} edges={['top', 'bottom']}>
+      <View style={s.waveA} />
+      <View style={s.waveB} />
+      <ScrollView contentContainerStyle={s.page}>
+        <View style={s.top}>
+          <Text style={s.logo} accessibilityRole="header">{BRAND_NAME}</Text>
+          <Text style={s.slogan}>{BRAND_SLOGAN}</Text>
+        </View>
 
-          <Card>
-            <Text style={styles.section}>Únete a {BRAND_NAME}</Text>
-            <Text style={styles.muted}>Una sola cuenta te permite contratar servicios u ofrecer los tuyos.</Text>
-            <Button title="Crear cuenta" onPress={() => navigation.navigate('Register')} />
-            <Button title="Ya tengo cuenta" variant="outline" onPress={() => navigation.navigate('Login')} />
-          </Card>
-          <Text style={styles.disclaimer}>Versión de desarrollo: no hay pagos dentro de la app.</Text>
+        {/* Ilustración hecha con íconos: casa + ubicación + destellos */}
+        <View style={s.art} accessible accessibilityLabel="Servicios locales en tu comunidad">
+          <View style={s.artCircle}>
+            <Icon name="home-outline" size={92} color={colors.blue} />
+          </View>
+          <View style={s.pin}><Icon name="location" size={30} color={colors.blue} /></View>
+          <Icon name="sparkles" size={22} color={colors.turquoise} style={s.sparkL} />
+          <Icon name="sparkles" size={18} color={colors.turquoise} style={s.sparkR} />
+        </View>
+        <Text style={s.zone}>Comenzamos con lavanderías en {LAUNCH_ZONE_LABEL}</Text>
+
+        <View style={s.actions}>
+          <Button title="Iniciar sesión" onPress={() => navigation.navigate('Login')} />
+          <Button title="Registrarse" variant="outline" onPress={() => navigation.navigate('Register')} />
+          <Pressable onPress={() => navigation.navigate('ForgotPassword')} style={s.forgot} accessibilityRole="button">
+            <Text style={s.forgotText}>¿Olvidaste tu contraseña?</Text>
+          </Pressable>
         </View>
       </ScrollView>
     </SafeAreaView>
   );
 }
+
+const s = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: colors.white },
+  waveA: { position: 'absolute', top: -140, right: -120, width: 360, height: 300, borderRadius: 180, backgroundColor: '#E6FAF8' },
+  waveB: { position: 'absolute', bottom: -160, left: -120, width: 420, height: 320, borderRadius: 200, backgroundColor: '#EAF2FF' },
+  page: { flexGrow: 1, justifyContent: 'space-between', paddingHorizontal: 24, paddingTop: 48, paddingBottom: 24, width: '100%', maxWidth: 520, alignSelf: 'center' },
+  top: { alignItems: 'center' },
+  logo: { fontFamily: fonts.black, fontSize: 64, color: colors.blue, letterSpacing: 1 },
+  slogan: { fontFamily: fonts.medium, fontSize: 20, color: colors.ink, textAlign: 'center', marginTop: 4, lineHeight: 27 },
+  art: { alignSelf: 'center', width: 200, height: 190, alignItems: 'center', justifyContent: 'center', marginTop: 28 },
+  artCircle: { width: 160, height: 160, borderRadius: 80, backgroundColor: '#F0F6FF', alignItems: 'center', justifyContent: 'center' },
+  pin: { position: 'absolute', top: 2, backgroundColor: colors.white, borderRadius: 22, padding: 4 },
+  sparkL: { position: 'absolute', left: 8, top: 48 },
+  sparkR: { position: 'absolute', right: 10, top: 64 },
+  zone: { fontFamily: fonts.regular, fontSize: 13, color: colors.muted, textAlign: 'center', marginTop: 8 },
+  actions: { marginTop: 28 },
+  forgot: { alignSelf: 'center', padding: 14 },
+  forgotText: { fontFamily: fonts.semibold, fontSize: 14, color: colors.blue },
+});

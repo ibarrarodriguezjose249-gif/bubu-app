@@ -29,8 +29,8 @@ export const INITIAL_ZONES = [
 ];
 
 export const FULFILLMENT_MODES = {
-  dropoff: { label: 'El cliente lo lleva', providerLabel: 'Recibo en mi local / casa', icon: '🏪' },
-  pickup_delivery: { label: 'Recolección y entrega', providerLabel: 'Recojo y entrego', icon: '🚗' },
+  dropoff: { label: 'El cliente lo lleva', providerLabel: 'Recibo en mi local / casa', icon: 'storefront-outline' },
+  pickup_delivery: { label: 'Recolección y entrega', providerLabel: 'Recojo y entrego', icon: 'car-outline' },
 };
 
 export function sortByOrder(list) {

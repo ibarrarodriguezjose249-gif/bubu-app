@@ -1,11 +1,13 @@
 // Detalle de un pedido para cliente y proveedor: estado, datos de contacto y acciones.
 import React, { useEffect, useState } from 'react';
 import { Linking, StyleSheet, Text, View } from 'react-native';
-import { Button, Card, Field, Loading, Notice, Screen, styles } from '../../components/ui';
+import { Button, Card, Field, IconLine, Loading, Notice, Screen, styles } from '../../components/ui';
+import Icon from '../../components/Icon';
+import { StatusPill } from '../../components/cards';
 import { STAR_WORDS, StarPicker, Stars } from '../../components/Rating';
 import { REVIEW_COMMENT_MAX, getReview, submitReview } from '../../services/reviews';
 import { useAuth } from '../../context/AuthContext';
-import { colors } from '../../constants/brand';
+import { colors, fonts } from '../../constants/brand';
 import { FULFILLMENT_MODES } from '../../constants/catalog';
 import { CUSTOMER_TRANSITIONS, ORDER_STATUS, PROVIDER_TRANSITIONS } from '../../constants/orderStatus';
 import { changeOrderStatus, subscribeOrder } from '../../services/orders';
@@ -16,11 +18,11 @@ const STEPS = ['requested', 'accepted', 'in_progress', 'ready', 'delivered'];
 
 const ACTION_LABELS = {
   provider: {
-    accepted: '✓ Aceptar pedido',
+    accepted: 'Aceptar pedido',
     rejected: 'Rechazar',
-    in_progress: '🧺 Recibí la ropa / Empecé',
-    ready: '✅ Marcar como listo',
-    delivered: '📦 Marcar como entregado',
+    in_progress: 'Recibí la ropa / Empecé',
+    ready: 'Marcar como listo',
+    delivered: 'Marcar como entregado',
     cancelled: 'Cancelar pedido',
   },
   customer: { cancelled: 'Cancelar pedido' },
@@ -101,7 +103,7 @@ export default function OrderDetailScreen({ route }) {
 
       <View style={styles.row}>
         <Text style={styles.title} numberOfLines={1}>{role === 'provider' ? order.customerName : order.providerName}</Text>
-        <Text style={[s.status, { color: st.color, borderColor: st.color }]}>{st.label}</Text>
+        <StatusPill status={order.status} />
       </View>
       <Text style={styles.muted}>Pedido {timeAgo(order.createdAt, now)}</Text>
 
@@ -110,8 +112,11 @@ export default function OrderDetailScreen({ route }) {
         <View style={s.steps}>
           {STEPS.map((k, i) => (
             <View key={k} style={s.stepWrap}>
-              <View style={[s.step, i <= stepIndex && { backgroundColor: colors.blue }]} />
-              <Text style={[s.stepText, i <= stepIndex && { color: colors.blue, fontWeight: '800' }]} numberOfLines={1}>{ORDER_STATUS[k].label}</Text>
+              {i > 0 && <View style={[s.line, i <= stepIndex && { backgroundColor: colors.blue }]} />}
+              <View style={[s.dot, i <= stepIndex && s.dotOn, i === stepIndex && s.dotNow]}>
+                <Icon name={ORDER_STATUS[k].icon} size={16} color={i <= stepIndex ? colors.white : '#9AA6B8'} />
+              </View>
+              <Text style={[s.stepText, i <= stepIndex && { color: colors.blue, fontFamily: fonts.bold }]} numberOfLines={1}>{ORDER_STATUS[k].label}</Text>
             </View>
           ))}
         </View>
@@ -120,19 +125,19 @@ export default function OrderDetailScreen({ route }) {
       <Card>
         <Text style={styles.section}>Pedido</Text>
         <Text style={styles.text}>{order.details}</Text>
-        <Text style={styles.muted}>{FULFILLMENT_MODES[order.fulfillmentMode]?.icon} {FULFILLMENT_MODES[order.fulfillmentMode]?.label}{order.whenText ? ` · ${order.whenText}` : ''}</Text>
-        {!!order.agreedPickup && <Text style={styles.muted}>🚗 Recoge / recibe: {order.agreedPickup}</Text>}
-        {!!order.agreedReady && <Text style={styles.muted}>✅ Listo: {order.agreedReady}</Text>}
-        {typeof order.priceEstimate === 'number' && <Text style={[styles.text, { marginTop: 8, fontWeight: '800' }]}>Precio estimado: {formatMoney(order.priceEstimate)}</Text>}
+        <IconLine icon={FULFILLMENT_MODES[order.fulfillmentMode]?.icon || 'swap-horizontal-outline'}>{FULFILLMENT_MODES[order.fulfillmentMode]?.label}{order.whenText ? ` · ${order.whenText}` : ''}</IconLine>
+        {!!order.agreedPickup && <IconLine icon="car-outline">Recoge / recibe: {order.agreedPickup}</IconLine>}
+        {!!order.agreedReady && <IconLine icon="checkmark-circle-outline">Listo: {order.agreedReady}</IconLine>}
+        {typeof order.priceEstimate === 'number' && <Text style={[styles.text, { marginTop: 8, fontFamily: fonts.extra }]}>Precio estimado: {formatMoney(order.priceEstimate)}</Text>}
         <Text style={styles.muted}>El pago se acuerda directo entre ustedes. BÜBÜ no cobra dentro de la app.</Text>
       </Card>
 
       <Card>
         <Text style={styles.section}>Contacto</Text>
-        <Text style={styles.muted}>📍 Colonia: {order.colonia}</Text>
-        {!!order.address && <Text style={styles.text}>🏠 {order.address}</Text>}
+        <IconLine icon="location-outline">Colonia: {order.colonia}</IconLine>
+        {!!order.address && <IconLine icon="home-outline" color={colors.ink}>{order.address}</IconLine>}
         {otherPhone ? (
-          <Button title={`📞 Llamar al ${otherPhone}`} variant="outline" onPress={() => Linking.openURL(`tel:${otherPhone}`)} />
+          <Button icon="call-outline" title={`Llamar al ${otherPhone}`} variant="outline" onPress={() => Linking.openURL(`tel:${otherPhone}`)} />
         ) : (
           <Text style={styles.muted}>{role === 'provider' ? 'El cliente no compartió teléfono.' : 'La lavandería compartirá su teléfono al aceptar.'}</Text>
         )}
@@ -142,7 +147,7 @@ export default function OrderDetailScreen({ route }) {
         <Card style={{ borderColor: '#f5a623' }}>
           <Text style={[styles.section, { textAlign: 'center' }]}>¿Cómo te fue con {order.providerName}?</Text>
           <StarPicker value={stars} onChange={setStars} disabled={rateBusy} />
-          <Text style={[styles.muted, { textAlign: 'center', fontWeight: '800' }]}>{STAR_WORDS[stars] || 'Toca una estrella'}</Text>
+          <Text style={[styles.muted, { textAlign: 'center', fontFamily: fonts.extra }]}>{STAR_WORDS[stars] || 'Toca una estrella'}</Text>
           <Field label="Comentario (opcional)" value={comment} onChangeText={setComment} multiline maxLength={REVIEW_COMMENT_MAX} placeholder="Ej. Puntuales y la ropa quedó muy bien doblada." hint="Se publica con tu primer nombre. No se puede editar después." />
           <Notice tone={rateMsg.tone}>{rateMsg.text}</Notice>
           <Button title="Enviar calificación" onPress={sendReview} loading={rateBusy} />
@@ -178,9 +183,11 @@ export default function OrderDetailScreen({ route }) {
 }
 
 const s = StyleSheet.create({
-  status: { fontSize: 12, fontWeight: '800', borderWidth: 1, borderRadius: 20, paddingHorizontal: 9, paddingVertical: 5, overflow: 'hidden' },
-  steps: { flexDirection: 'row', marginTop: 16, gap: 4 },
+  steps: { flexDirection: 'row', marginTop: 18, backgroundColor: colors.surface, borderRadius: 20, paddingVertical: 14, paddingHorizontal: 6 },
   stepWrap: { flex: 1, alignItems: 'center' },
-  step: { height: 6, alignSelf: 'stretch', borderRadius: 3, backgroundColor: '#dbe4f2' },
-  stepText: { fontSize: 10, color: colors.muted, marginTop: 6 },
+  line: { position: 'absolute', top: 15, right: '50%', width: '100%', height: 3, backgroundColor: '#DCE3EE' },
+  dot: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#E4E9F1', alignItems: 'center', justifyContent: 'center' },
+  dotOn: { backgroundColor: colors.blue },
+  dotNow: { backgroundColor: colors.turquoise, transform: [{ scale: 1.1 }] },
+  stepText: { fontFamily: fonts.medium, fontSize: 10, color: colors.muted, marginTop: 6 },
 });

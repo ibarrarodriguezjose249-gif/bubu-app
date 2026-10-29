@@ -16,6 +16,8 @@ import ModeSwitchModal from '../../components/ModeSwitchModal';
 import { Badge, Button, Card, Notice, styles } from '../../components/ui';
 import { RequestCard, StatPill } from '../../components/cards';
 import { RatingBadge } from '../../components/Rating';
+import Icon from '../../components/Icon';
+import { IconLine } from '../../components/ui';
 import { useAuth } from '../../context/AuthContext';
 import { useCatalog } from '../../context/CatalogContext';
 import { PROVIDER_STATUS, heartbeat, setAvailability } from '../../services/providers';
@@ -24,7 +26,7 @@ import { subscribeMyOrders } from '../../services/orders';
 import { ratingSummary, subscribeMyProviderReviews } from '../../services/reviews';
 import { FULFILLMENT_MODES } from '../../constants/catalog';
 import { HEARTBEAT_MS, MISSED_WINDOW_DAYS, PROVIDER_TYPES } from '../../constants/requests';
-import { BRAND_NAME, colors } from '../../constants/brand';
+import { BRAND_NAME, colors, fonts } from '../../constants/brand';
 import { countdown, toMillis, timeAgo, useNow } from '../../lib/time';
 import { friendlyError } from '../../lib/errors';
 import { keepScreenOn } from '../../lib/keepAwake';
@@ -214,11 +216,11 @@ export default function ProviderHomeScreen({ navigation }) {
   function openRequestFooter(r) {
     const offered = myOffers[r.id];
     if (!canServe(r)) return <Text style={styles.muted}>No ofreces esta modalidad.</Text>;
-    if (offered) return <Badge tone="success">{offered.kind === 'accept' ? '✓ Aceptaste — el cliente decide' : `✓ Ya ofertaste${typeof offered.priceFrom === 'number' ? ` $${offered.priceFrom}` : ''} — toca para editar`}</Badge>;
+    if (offered) return <Badge tone="success">{offered.kind === 'accept' ? 'Aceptaste — el cliente decide' : `Ya ofertaste${typeof offered.priceFrom === 'number' ? ` $${offered.priceFrom}` : ''} — toca para editar`}</Badge>;
     if (!available) return null;
     return (
       <View>
-        <Button title={`👍 Acepto · ${r.whenText || 'su horario'}`} onPress={() => quickAccept(r)} loading={accepting === r.id} disabled={!!accepting} />
+        <Button icon="thumbs-up-outline" title={`Acepto · ${r.whenText || 'su horario'}`} onPress={() => quickAccept(r)} loading={accepting === r.id} disabled={!!accepting} />
         <Button title="Proponer precio u horario" variant="outline" onPress={() => navigation.navigate('MakeOffer', { requestId: r.id })} disabled={!!accepting} />
       </View>
     );
@@ -227,7 +229,7 @@ export default function ProviderHomeScreen({ navigation }) {
   const ordersBar = activeOrders.length > 0 && (
     <Pressable onPress={() => navigation.navigate('Pedidos')} style={({ pressed }) => [s.ordersBar, pressed && { opacity: 0.9 }]}>
       <Text style={s.ordersBarText}>
-        📦 {activeOrders.length} {activeOrders.length === 1 ? 'pedido en curso' : 'pedidos en curso'}
+        {activeOrders.length} {activeOrders.length === 1 ? 'pedido en curso' : 'pedidos en curso'}
         {toAccept.length > 0 ? ` · ${toAccept.length} por aceptar` : ''}
       </Text>
       <Text style={s.ordersBarText}>›</Text>
@@ -236,7 +238,7 @@ export default function ProviderHomeScreen({ navigation }) {
 
   const missedCard = approved && (groups.missed.length > 0 || groups.lostWithOffer.length > 0) && (
     <Card style={{ marginTop: 22 }}>
-      <Text style={styles.section}>📉 Te perdiste esta semana</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}><Icon name="trending-down" size={20} color={colors.errorText} /><Text style={styles.section}>Te perdiste esta semana</Text></View>
       <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
         <StatPill value={groups.takenByOthers.length} label="los tomó otra lavandería" />
         <StatPill value={groups.expiredNoChoice.length} label="vencieron sin respuesta" />
@@ -245,7 +247,7 @@ export default function ProviderHomeScreen({ navigation }) {
       {groups.missed.slice(0, 3).map((r) => (
         <Text key={r.id} style={styles.muted}>• {(r.services || []).join(', ') || 'Pedido'} en {r.colonia} · {timeAgo(r.createdAt, now)}</Text>
       ))}
-      <Text style={[styles.text, { marginTop: 10 }]}>💡 Conéctate y responde rápido: los clientes eligen entre las primeras ofertas.</Text>
+      <IconLine icon="bulb-outline" color={colors.ink} style={{ marginTop: 10 }}>Conéctate y responde rápido: los clientes eligen entre las primeras ofertas.</IconLine>
     </Card>
   );
 
@@ -256,14 +258,14 @@ export default function ProviderHomeScreen({ navigation }) {
       <SafeAreaView style={{ flex: 1, backgroundColor: colors.navy }} edges={['top']}>
         <ScrollView style={{ backgroundColor: colors.navy }} contentContainerStyle={{ paddingBottom: 40 }}>
           <View style={s.onTop}>
-            <Text style={s.onPill}>🟢 Conectado</Text>
-            <Pressable onPress={() => setModeOpen(true)} style={s.modeBtn}><Text style={s.modeText}>🧰 Modo proveedor ▾</Text></Pressable>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}><View style={s.onDot} /><Text style={s.onPill}>Conectado</Text></View>
+            <Pressable onPress={() => setModeOpen(true)} style={s.modeBtn}><Icon name="briefcase-outline" size={13} color={colors.white} /><Text style={s.modeText}>Proveedor</Text><Icon name="chevron-down" size={13} color={colors.white} /></Pressable>
           </View>
           <View style={{ alignItems: 'center', marginTop: 10 }}>
             <Radar size={250} />
             <Text style={s.onTitle}>Buscando pedidos…</Text>
             <Text style={s.onSub}>en {zoneLabel}</Text>
-            <Text style={s.onTime}>⏱ Conectado {onlineSince ? elapsed(now - onlineSince) : '0 min'} · la pantalla se mantiene encendida</Text>
+            <Text style={s.onTime}>Conectado {onlineSince ? elapsed(now - onlineSince) : '0 min'} · la pantalla se mantiene encendida</Text>
             {rating && <RatingBadge summary={rating} style={{ marginTop: 10 }} />}
           </View>
 
@@ -272,7 +274,7 @@ export default function ProviderHomeScreen({ navigation }) {
             <Notice tone="error">{error}</Notice>
             {wonActive.length > 0 && (
               <Pressable onPress={() => navigation.navigate('OrderDetail', { id: wonActive[0].orderId })} style={s.wonBar}>
-                <Text style={s.wonText}>🎉 Te eligieron en {wonActive.length} {wonActive.length === 1 ? 'pedido en curso' : 'pedidos en curso'} · ver el último ›</Text>
+                <Icon name="trophy-outline" size={18} color={colors.white} /><Text style={s.wonText}>Te eligieron en {wonActive.length} {wonActive.length === 1 ? 'pedido en curso' : 'pedidos en curso'} · ver el último ›</Text>
               </Pressable>
             )}
             {others.length > 0 && (
@@ -297,15 +299,15 @@ export default function ProviderHomeScreen({ navigation }) {
             {incoming && (
               <View style={s.sheet}>
                 <View style={styles.row}>
-                  <Text style={s.newTag}>🔔 NUEVO PEDIDO</Text>
-                  <Text style={s.sheetTimer}>⏱ {countdown(incoming.expiresAt, now)}</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}><Icon name="notifications" size={16} color={colors.blue} /><Text style={s.newTag}>NUEVO PEDIDO</Text></View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}><Icon name="time-outline" size={16} color={colors.blue} /><Text style={s.sheetTimer}>{countdown(incoming.expiresAt, now)}</Text></View>
                 </View>
                 <Text style={s.sheetTitle}>{requestSummary(incoming) || 'Pedido'}</Text>
-                <Text style={s.sheetLine}>📍 {incoming.colonia}</Text>
-                <Text style={s.sheetLine}>{FULFILLMENT_MODES[incoming.fulfillmentMode]?.icon} {FULFILLMENT_MODES[incoming.fulfillmentMode]?.label}</Text>
-                <Text style={s.sheetLine}>🗓 {incoming.whenText || 'Lo antes posible'}</Text>
+                <IconLine icon="location-outline" color={colors.ink} textStyle={s.sheetText}>{incoming.colonia}</IconLine>
+                <IconLine icon={FULFILLMENT_MODES[incoming.fulfillmentMode]?.icon || 'car-outline'} color={colors.ink} textStyle={s.sheetText}>{FULFILLMENT_MODES[incoming.fulfillmentMode]?.label}</IconLine>
+                <IconLine icon="calendar-outline" color={colors.ink} textStyle={s.sheetText}>{incoming.whenText || 'Lo antes posible'}</IconLine>
                 <Text style={[styles.muted, { marginTop: 10 }]}>Los datos del cliente se comparten solo si te elige.</Text>
-                <Button title={`👍 Acepto · ${incoming.whenText || 'su horario'}`} onPress={() => quickAccept(incoming)} loading={accepting === incoming.id} disabled={!!accepting} style={{ minHeight: 56 }} />
+                <Button icon="thumbs-up-outline" title={`Acepto · ${incoming.whenText || 'su horario'}`} onPress={() => quickAccept(incoming)} loading={accepting === incoming.id} disabled={!!accepting} style={{ minHeight: 56 }} />
                 <Button title="Proponer precio u horario" variant="soft" disabled={!!accepting}
                   onPress={() => { setDismissed((d) => ({ ...d, [incoming.id]: true })); navigation.navigate('MakeOffer', { requestId: incoming.id }); }} />
                 <Button title="Ahora no" variant="outline" disabled={!!accepting} onPress={() => setDismissed((d) => ({ ...d, [incoming.id]: true }))} />
@@ -318,7 +320,7 @@ export default function ProviderHomeScreen({ navigation }) {
         <Modal visible={!!justSent && !chosen} transparent animationType="fade" onRequestClose={() => setJustSent(null)}>
           <Pressable style={s.centerBg} onPress={() => setJustSent(null)}>
             <View style={s.sentBox}>
-              <Text style={{ fontSize: 46 }}>✅</Text>
+              <Icon name="checkmark-circle" size={56} color={colors.success} />
               <Text style={s.sentTitle}>Oferta enviada</Text>
               <Text style={[styles.muted, { textAlign: 'center' }]}>El cliente está eligiendo… Si te elige, lo verás aquí.</Text>
             </View>
@@ -339,7 +341,8 @@ export default function ProviderHomeScreen({ navigation }) {
           eyebrow="MODO PROVEEDOR"
           title={approved ? 'Estás desconectado.' : 'Ofrece tus servicios.'}
           intro={approved ? 'Conéctate para recibir pedidos de tu zona y mandar tus ofertas.' : 'Registra tu negocio o tu servicio desde casa.'}
-          modeLabel="🧰 Modo proveedor"
+          modeLabel="Proveedor"
+          modeIcon="briefcase-outline"
           onModePress={() => setModeOpen(true)}
         />
         <View style={styles.page}>
@@ -347,7 +350,7 @@ export default function ProviderHomeScreen({ navigation }) {
             <View style={{ alignItems: 'center', marginTop: 4 }}>
               <Pressable onPress={() => toggle(true)} disabled={toggling} accessibilityRole="button" accessibilityLabel="Conectarme"
                 style={({ pressed }) => [s.goBtn, pressed && { transform: [{ scale: 0.96 }] }, toggling && { opacity: 0.6 }]}>
-                <Text style={s.goIcon}>⏻</Text>
+                <Icon name="power" size={46} color={colors.white} />
                 <Text style={s.goText}>{toggling ? 'Conectando…' : 'Conectarme'}</Text>
               </Pressable>
               <Text style={[styles.muted, { textAlign: 'center' }]}>
@@ -373,10 +376,10 @@ export default function ProviderHomeScreen({ navigation }) {
 
           {approved && wonActive.length > 0 && (
             <>
-              <Text style={[styles.section, { marginTop: 22 }]}>🎉 ¡Te eligieron!</Text>
+              <Text style={[styles.section, { marginTop: 22 }]}>¡Te eligieron!</Text>
               {wonActive.slice(0, 3).map((r) => (
                 <RequestCard key={r.id} request={r} state="assigned" now={now} onPress={() => navigation.navigate('OrderDetail', { id: r.orderId })}
-                  footer={<Text style={[styles.muted, { color: colors.blue, fontWeight: '800' }]}>Ver pedido y datos del cliente ›</Text>} />
+                  footer={<Text style={[styles.muted, { color: colors.blue, fontFamily: fonts.extra }]}>Ver pedido y datos del cliente ›</Text>} />
               ))}
             </>
           )}
@@ -417,10 +420,10 @@ function ChosenModal({ chosen, onClose }) {
       <View style={s.centerBg}>
         {chosen && (
           <View style={s.chosenBox}>
-            <Text style={{ fontSize: 64 }}>🎉</Text>
+            <View style={s.trophy}><Icon name="trophy" size={44} color={colors.white} /></View>
             <Text style={s.chosenTitle}>¡Te eligieron!</Text>
             <Text style={[styles.text, { textAlign: 'center', marginTop: 6 }]}>{requestSummary(chosen) || 'Pedido'}</Text>
-            <Text style={[styles.muted, { textAlign: 'center' }]}>📍 {chosen.colonia}{chosen.whenText ? ` · ${chosen.whenText}` : ''}</Text>
+            <Text style={[styles.muted, { textAlign: 'center' }]}>{chosen.colonia}{chosen.whenText ? ` · ${chosen.whenText}` : ''}</Text>
             <Button title="Ver pedido y datos del cliente" onPress={() => onClose(true)} style={{ alignSelf: 'stretch' }} />
             <Button title="Después" variant="soft" onPress={() => onClose(false)} style={{ alignSelf: 'stretch' }} />
           </View>
@@ -433,36 +436,38 @@ function ChosenModal({ chosen, onClose }) {
 const s = StyleSheet.create({
   // Desconectado
   goBtn: { width: 170, height: 170, borderRadius: 85, backgroundColor: colors.blue, alignItems: 'center', justifyContent: 'center', marginTop: 8, marginBottom: 6,
-    borderWidth: 8, borderColor: '#cfe1ff', shadowColor: colors.blue, shadowOpacity: 0.45, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 10 },
-  goIcon: { fontSize: 42, color: colors.white, fontWeight: '900' },
-  goText: { fontSize: 18, color: colors.white, fontWeight: '900', marginTop: 4 },
-  ratingPill: { flex: 1, backgroundColor: '#fff6e5', borderRadius: 14, padding: 12 },
-  ratingValue: { fontSize: 22, fontWeight: '900', color: '#b26b00' },
-  ratingLabel: { fontSize: 12, color: colors.muted, marginTop: 2 },
-  ordersBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: colors.turquoise, borderRadius: 14, paddingVertical: 14, paddingHorizontal: 16, marginTop: 12 },
-  ordersBarText: { fontSize: 15, fontWeight: '900', color: colors.navy },
+    borderWidth: 8, borderColor: '#D6E6FF', shadowColor: colors.blue, shadowOpacity: 0.45, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 10 },
+  goIcon: { fontSize: 42, color: colors.white, fontFamily: fonts.black },
+  goText: { fontSize: 18, color: colors.white, fontFamily: fonts.black, marginTop: 4 },
+  ratingPill: { flex: 1, backgroundColor: '#FFF6E5', borderRadius: 16, padding: 12 },
+  ratingValue: { fontSize: 22, fontFamily: fonts.black, color: '#b26b00' },
+  ratingLabel: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, marginTop: 2 },
+  ordersBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: colors.turquoise, borderRadius: 16, paddingVertical: 14, paddingHorizontal: 16, marginTop: 12 },
+  ordersBarText: { fontSize: 15, fontFamily: fonts.bold, color: colors.navy },
   // Conectado
   onTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 18, paddingTop: 12 },
-  onPill: { color: '#7dffb6', fontWeight: '900', fontSize: 15 },
-  modeBtn: { backgroundColor: '#ffffff1f', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7 },
-  modeText: { color: colors.white, fontWeight: '700', fontSize: 12 },
-  onTitle: { fontSize: 26, fontWeight: '900', color: colors.white, marginTop: 6 },
-  onSub: { fontSize: 15, color: '#cfe9ff', marginTop: 4 },
-  onTime: { fontSize: 12, color: '#8fa9cc', marginTop: 10, textAlign: 'center', paddingHorizontal: 20 },
-  onHint: { fontSize: 14, color: '#cfe9ff', textAlign: 'center', marginTop: 18, lineHeight: 20 },
-  wonBar: { backgroundColor: '#1fb36b', borderRadius: 14, padding: 14, marginTop: 12 },
-  wonText: { color: colors.white, fontWeight: '900', fontSize: 14 },
+  onPill: { color: '#7DFFD0', fontFamily: fonts.bold, fontSize: 15 },
+  onDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.success },
+  modeBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#ffffff1f', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7 },
+  modeText: { color: colors.white, fontFamily: fonts.bold, fontSize: 12 },
+  onTitle: { fontSize: 26, fontFamily: fonts.extra, color: colors.white, marginTop: 6 },
+  onSub: { fontFamily: fonts.regular, fontSize: 15, color: '#cfe9ff', marginTop: 4 },
+  onTime: { fontFamily: fonts.regular, fontSize: 12, color: '#8fa9cc', marginTop: 10, textAlign: 'center', paddingHorizontal: 20 },
+  onHint: { fontFamily: fonts.regular, fontSize: 14, color: '#cfe9ff', textAlign: 'center', marginTop: 18, lineHeight: 20 },
+  wonBar: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: colors.success, borderRadius: 16, padding: 14, marginTop: 12 },
+  wonText: { flex: 1, color: colors.white, fontFamily: fonts.bold, fontSize: 14 },
   // Tarjeta entrante
   sheetBg: { flex: 1, justifyContent: 'flex-end', backgroundColor: '#06142a99' },
   sheet: { backgroundColor: colors.white, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 22, paddingBottom: 34 },
-  newTag: { fontSize: 13, fontWeight: '900', color: colors.blue, letterSpacing: 1 },
-  sheetTimer: { fontSize: 15, fontWeight: '900', color: colors.blue },
-  sheetTitle: { fontSize: 24, fontWeight: '900', color: colors.ink, marginTop: 12 },
-  sheetLine: { fontSize: 16, color: colors.ink, marginTop: 8 },
+  newTag: { fontSize: 13, fontFamily: fonts.extra, color: colors.blue, letterSpacing: 1 },
+  sheetTimer: { fontSize: 15, fontFamily: fonts.black, color: colors.blue },
+  sheetTitle: { fontSize: 24, fontFamily: fonts.extra, color: colors.ink, marginTop: 12 },
+  sheetText: { fontFamily: fonts.medium, fontSize: 16, lineHeight: 22 },
   // Ventanas centradas
   centerBg: { flex: 1, backgroundColor: '#06142ab0', alignItems: 'center', justifyContent: 'center', padding: 22 },
   sentBox: { backgroundColor: colors.white, borderRadius: 24, padding: 26, alignItems: 'center', width: '100%', maxWidth: 400 },
-  sentTitle: { fontSize: 22, fontWeight: '900', color: colors.ink, marginTop: 6 },
-  chosenBox: { backgroundColor: colors.white, borderRadius: 28, padding: 26, alignItems: 'center', width: '100%', maxWidth: 420, borderWidth: 4, borderColor: '#1fb36b' },
-  chosenTitle: { fontSize: 30, fontWeight: '900', color: '#127a4a', marginTop: 4 },
+  sentTitle: { fontSize: 22, fontFamily: fonts.black, color: colors.ink, marginTop: 6 },
+  chosenBox: { backgroundColor: colors.white, borderRadius: 28, padding: 26, alignItems: 'center', width: '100%', maxWidth: 420, borderWidth: 4, borderColor: colors.success },
+  chosenTitle: { fontSize: 30, fontFamily: fonts.extra, color: colors.successText, marginTop: 10 },
+  trophy: { width: 84, height: 84, borderRadius: 42, backgroundColor: colors.success, alignItems: 'center', justifyContent: 'center' },
 });

@@ -17,11 +17,11 @@ export default function ColoniaField({ zoneId = 'general-zuazua', value, onChang
   const matches = exact ? [] : list.filter((c) => !q || norm(c).includes(q)).slice(0, 8);
   return (
     <View>
-      <Field label={label} value={value} onChangeText={onChange} maxLength={LIMITS.colonia}
+      <Field icon="location-outline" label={label} value={value} onChangeText={onChange} maxLength={LIMITS.colonia}
         placeholder={list.length ? 'Escribe para buscar tu colonia' : ''} hint={hint} />
       {list.length > 0 && matches.length > 0 && (
         <View style={[styles.wrap, { marginTop: 8 }]}>
-          {matches.map((c) => <Chip key={c} label={`📍 ${c}`} onPress={() => onChange(c)} />)}
+          {matches.map((c) => <Chip key={c} label={c} onPress={() => onChange(c)} />)}
         </View>
       )}
       {list.length > 0 && q.length > 1 && !exact && matches.length === 0 && (

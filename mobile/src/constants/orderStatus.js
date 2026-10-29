@@ -3,14 +3,14 @@
 // Si cambias una, cambia la otra (las pruebas de reglas lo verifican).
 
 export const ORDER_STATUS = {
-  requested: { label: 'Solicitado', color: '#1769ff' },
-  accepted: { label: 'Aceptado', color: '#0f8f86' },
-  rejected: { label: 'Rechazado', color: '#a12626' },
-  in_progress: { label: 'En proceso', color: '#a76b00' },
-  ready: { label: 'Listo', color: '#126748' },
-  delivered: { label: 'Entregado', color: '#126748' },
-  cancelled: { label: 'Cancelado', color: '#6e7b91' },
-  disputed: { label: 'En revisión', color: '#a12626' },
+  requested: { label: 'Solicitado', color: '#0066FF', bg: '#EAF2FF', icon: 'paper-plane-outline' },
+  accepted: { label: 'Aceptado', color: '#00897F', bg: '#DDF7F4', icon: 'checkmark-circle-outline' },
+  rejected: { label: 'Rechazado', color: '#B42318', bg: '#FFECEC', icon: 'close-circle-outline' },
+  in_progress: { label: 'En proceso', color: '#9A6200', bg: '#FFF6DD', icon: 'sync-outline' },
+  ready: { label: 'Listo', color: '#0E7A4B', bg: '#E3F8EE', icon: 'bag-check-outline' },
+  delivered: { label: 'Entregado', color: '#0E7A4B', bg: '#E3F8EE', icon: 'checkmark-done-outline' },
+  cancelled: { label: 'Cancelado', color: '#5B6B82', bg: '#EEF1F5', icon: 'ban-outline' },
+  disputed: { label: 'En revisión', color: '#B42318', bg: '#FFECEC', icon: 'alert-circle-outline' },
 };
 
 // Quién puede mover el pedido de un estado a otro.

@@ -77,7 +77,7 @@ export default function DirectBookingScreen({ navigation, route }) {
       <Text style={[styles.label, { marginTop: 14 }]}>Entrega</Text>
       <ChipGroup
         options={modes}
-        labels={Object.fromEntries(modes.map((k) => [k, `${FULFILLMENT_MODES[k]?.icon} ${FULFILLMENT_MODES[k]?.label}`]))}
+        labels={Object.fromEntries(modes.map((k) => [k, FULFILLMENT_MODES[k]?.label]))}
         value={form.fulfillmentMode}
         onChange={set('fulfillmentMode')}
       />

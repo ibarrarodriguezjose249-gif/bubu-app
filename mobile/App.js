@@ -1,16 +1,35 @@
 // Punto de entrada de la app BÜBÜ.
-// La pantalla única de la versión 0 se conserva en docs/referencia/App_v0_pantalla_unica.js
-// y su diseño se reutiliza en src/components/Hero.js y src/screens/*/…HomeScreen.js.
+// Carga la tipografía Montserrat y después muestra la app.
 import React from 'react';
+import { Text, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import {
+  useFonts, Montserrat_400Regular, Montserrat_500Medium, Montserrat_600SemiBold,
+  Montserrat_700Bold, Montserrat_800ExtraBold, Montserrat_900Black,
+} from '@expo-google-fonts/montserrat';
 import { firebaseReady, firebaseMissingEnv } from './src/lib/firebase';
 import { AuthProvider } from './src/context/AuthContext';
 import { CatalogProvider } from './src/context/CatalogContext';
 import RootNavigator from './src/navigation/RootNavigator';
 import { ConfigMissingScreen } from './src/screens/common/SystemScreens';
+import { BRAND_NAME, colors } from './src/constants/brand';
 
 export default function App() {
+  const [fontsLoaded, fontError] = useFonts({
+    Montserrat_400Regular, Montserrat_500Medium, Montserrat_600SemiBold,
+    Montserrat_700Bold, Montserrat_800ExtraBold, Montserrat_900Black,
+  });
+
+  // Mientras carga la tipografía: pantalla azul con el nombre (como el ícono).
+  if (!fontsLoaded && !fontError) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.blue, alignItems: 'center', justifyContent: 'center' }}>
+        <Text style={{ color: colors.white, fontSize: 48, fontWeight: '900' }}>{BRAND_NAME}</Text>
+      </View>
+    );
+  }
+
   return (
     <SafeAreaProvider>
       <StatusBar style="dark" />

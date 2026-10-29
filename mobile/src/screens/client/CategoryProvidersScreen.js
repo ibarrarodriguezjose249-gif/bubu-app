@@ -33,7 +33,7 @@ export default function CategoryProvidersScreen({ navigation, route }) {
   const cat = categoryById(categoryId);
   return (
     <Screen>
-      <Text style={styles.title}>{cat?.icon} {cat?.name || 'Servicio'}</Text>
+      <Text style={styles.title}>{cat?.name || 'Servicio'}</Text>
       <Text style={styles.muted}>En {zoneById(zoneId)?.name || 'tu zona'} · {list.length} {list.length === 1 ? 'proveedor' : 'proveedores'}</Text>
 
       <Card>

@@ -18,8 +18,8 @@ export function serviceOptionsFor(category, categoryId) {
 }
 
 export const PROVIDER_TYPES = {
-  business: { label: 'Negocio establecido', badge: '🏪 Negocio' },
-  home: { label: 'Trabajo desde casa', badge: '🏠 Desde casa' },
+  business: { label: 'Negocio establecido', badge: 'Negocio', icon: 'storefront-outline' },
+  home: { label: 'Trabajo desde casa', badge: 'Desde casa', icon: 'home-outline' },
 };
 
 // Fecha y horario del servicio.

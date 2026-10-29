@@ -4,6 +4,9 @@
 import React, { useEffect, useState } from 'react';
 import { Text } from 'react-native';
 import { Notice, Screen, styles } from '../../components/ui';
+import Icon from '../../components/Icon';
+import { View } from 'react-native';
+import { colors } from '../../constants/brand';
 import { OrderRow, RequestCard } from '../../components/cards';
 import { useAuth } from '../../context/AuthContext';
 import { subscribeMyOrders } from '../../services/orders';
@@ -48,11 +51,16 @@ export default function OrdersScreen({ navigation }) {
       <Text style={[styles.section, { marginTop: 18 }]}>En curso</Text>
       {orders === undefined && <Text style={styles.muted}>Cargando…</Text>}
       {orders !== undefined && active.length === 0 && (
-        <Text style={styles.muted}>
-          {mode === 'provider'
-            ? 'Aún no tienes pedidos. Activa "Estoy disponible" en Inicio y manda ofertas a los pedidos de tu zona.'
-            : 'No tienes pedidos en curso. Publica uno desde Inicio.'}
-        </Text>
+        <View style={{ alignItems: 'center', paddingVertical: 26 }}>
+          <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: colors.blueSoft, alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="receipt-outline" size={34} color={colors.blue} />
+          </View>
+          <Text style={[styles.muted, { textAlign: 'center', marginTop: 12 }]}>
+            {mode === 'provider'
+              ? 'Aún no tienes pedidos. Toca "Conectarme" en Inicio y manda ofertas a los pedidos de tu zona.'
+              : 'No tienes pedidos en curso. Publica uno desde Inicio.'}
+          </Text>
+        </View>
       )}
       {active.map((o) => <OrderRow key={o.id} order={o} role={mode} now={now} onPress={() => openOrder(o)} />)}
 

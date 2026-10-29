@@ -1,24 +1,49 @@
 // Identidad de marca. Cambia el nombre aquí y se actualiza en toda la app.
 export const BRAND_NAME = 'BÜBÜ';
-export const LAUNCH_ZONE_LABEL = 'General Zuazua, NL';
+export const BRAND_SLOGAN = 'Tu comunidad, tus servicios';
+export const LAUNCH_ZONE_LABEL = 'General Zuazua, N.L.';
 
-// Colores oficiales: azul eléctrico, turquesa y blanco.
+// Paleta oficial (actualización de diseño v0.3):
+// Azul eléctrico #0066FF (principal), Turquesa #00D1C1 (secundario),
+// Blanco #FFFFFF (fondo), Azul oscuro #0B2E5B (textos), Gris claro #E5E7EB (bordes).
 export const colors = {
-  blue: '#1769ff',        // azul eléctrico (principal)
-  blueDark: '#0e58e9',
-  turquoise: '#35d8df',   // turquesa (acento)
-  turquoiseSoft: '#9ffaff',
-  white: '#ffffff',
-  ink: '#13233d',         // texto principal
-  muted: '#6e7b91',       // texto secundario
-  bg: '#f4f7fc',          // fondo
-  border: '#e5ebf4',
-  blueSoft: '#eaf2ff',
-  successBg: '#e1f9ed',
-  successText: '#126748',
-  warnBg: '#fff7df',
-  warnText: '#785700',
-  errorBg: '#ffe9e9',
-  errorText: '#a12626',
-  navy: '#102d57',
+  blue: '#0066FF',
+  blueDark: '#0052CC',
+  turquoise: '#00D1C1',
+  turquoiseSoft: '#CCF6F2',
+  white: '#FFFFFF',
+  ink: '#0B2E5B',          // textos importantes
+  muted: '#5B6B82',        // texto secundario (contraste AA sobre blanco)
+  bg: '#FFFFFF',           // fondo principal
+  surface: '#F5F8FC',      // zonas suaves (secciones, chips)
+  border: '#E5E7EB',
+  blueSoft: '#EAF2FF',
+  successBg: '#E3F8EE',
+  successText: '#0E7A4B',
+  success: '#12B76A',
+  warnBg: '#FFF6DD',
+  warnText: '#7A5600',
+  errorBg: '#FFECEC',
+  errorText: '#B42318',
+  navy: '#0B2E5B',
+};
+
+// Tipografía Montserrat (paquete @expo-google-fonts/montserrat).
+// Cada grosor es una familia distinta: así se ve igual en Android, iPhone y web.
+export const fonts = {
+  regular: 'Montserrat_400Regular',
+  medium: 'Montserrat_500Medium',
+  semibold: 'Montserrat_600SemiBold',
+  bold: 'Montserrat_700Bold',
+  extra: 'Montserrat_800ExtraBold',
+  black: 'Montserrat_900Black',
+};
+
+// Sombra suave para tarjetas sobre fondo blanco.
+export const shadow = {
+  shadowColor: '#0B2E5B',
+  shadowOpacity: 0.07,
+  shadowRadius: 14,
+  shadowOffset: { width: 0, height: 4 },
+  elevation: 2,
 };

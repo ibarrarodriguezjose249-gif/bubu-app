@@ -1,12 +1,13 @@
 // Animación de "radar" (ondas que salen del centro), estilo app de viajes.
 // Solo es visual: no inventa actividad.
 import React, { useEffect, useRef } from 'react';
-import { Animated, Easing, Platform, StyleSheet, Text, View } from 'react-native';
+import { Animated, Easing, Platform, StyleSheet, View } from 'react-native';
 import { colors } from '../constants/brand';
+import Icon from './Icon';
 
 const NATIVE = Platform.OS !== 'web';
 
-export default function Radar({ size = 220, icon = '🧺', color = colors.turquoise, active = true }) {
+export default function Radar({ size = 220, icon = 'hanger', color = colors.turquoise, active = true }) {
   const waves = useRef([0, 1, 2].map(() => new Animated.Value(0))).current;
 
   useEffect(() => {
@@ -39,13 +40,13 @@ export default function Radar({ size = 220, icon = '🧺', color = colors.turquo
         />
       ))}
       <View style={[s.core, { width: core, height: core, borderRadius: core / 2, shadowColor: color }]}>
-        <Text style={{ fontSize: core * 0.45 }}>{icon}</Text>
+        <Icon name={icon} size={core * 0.46} color={colors.blue} />
       </View>
     </View>
   );
 }
 
 const s = StyleSheet.create({
-  wave: { position: 'absolute', borderWidth: 2, backgroundColor: '#35d8df22' },
+  wave: { position: 'absolute', borderWidth: 2, backgroundColor: '#00D1C122' },
   core: { backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center', shadowOpacity: 0.6, shadowRadius: 18, shadowOffset: { width: 0, height: 0 }, elevation: 8 },
 });

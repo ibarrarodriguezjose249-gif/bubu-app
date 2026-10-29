@@ -1,10 +1,13 @@
 import React, { useState } from 'react';
-import { Text } from 'react-native';
-import { Button, Field, Notice, Screen, styles } from '../../components/ui';
+import { Pressable, ScrollView, Text, View, KeyboardAvoidingView, Platform } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import AuthHeader from '../../components/AuthHeader';
+import { Button, Field, Notice, styles } from '../../components/ui';
 import { registerWithEmail } from '../../services/users';
 import { friendlyError } from '../../lib/errors';
 import { LIMITS, validateEmail, validateName, validatePassword, validatePhoneOptional } from '../../lib/validation';
-import { BRAND_NAME } from '../../constants/brand';
+import { BRAND_NAME, colors } from '../../constants/brand';
+import { authStyles } from './LoginScreen';
 
 export default function RegisterScreen({ navigation }) {
   const [form, setForm] = useState({ displayName: '', email: '', password: '', password2: '', phone: '', colonia: '' });
@@ -40,21 +43,32 @@ export default function RegisterScreen({ navigation }) {
   }
 
   return (
-    <Screen>
-      <Text style={styles.title}>Crear cuenta</Text>
-      <Text style={styles.muted}>Tu cuenta de {BRAND_NAME} sirve para contratar y también para ofrecer servicios.</Text>
-      <Field label="Nombre completo" value={form.displayName} onChangeText={set('displayName')} error={errors.displayName} maxLength={LIMITS.name} autoComplete="name" textContentType="name" />
-      <Field label="Correo" value={form.email} onChangeText={set('email')} error={errors.email} autoCapitalize="none" keyboardType="email-address" autoComplete="email" textContentType="emailAddress" />
-      <Field label="Contraseña" value={form.password} onChangeText={set('password')} error={errors.password} secureTextEntry autoComplete="new-password" textContentType="newPassword" hint="Mínimo 8 caracteres, con letras y números." />
-      <Field label="Repite la contraseña" value={form.password2} onChangeText={set('password2')} error={errors.password2} secureTextEntry />
-      <Field label="Teléfono (opcional)" value={form.phone} onChangeText={set('phone')} error={errors.phone} keyboardType="phone-pad" maxLength={LIMITS.phone} hint="10 dígitos. Solo se comparte con quien atienda tus pedidos." />
-      <Field label="Colonia en General Zuazua (opcional)" value={form.colonia} onChangeText={set('colonia')} maxLength={LIMITS.colonia} />
-      <Notice tone="error">{error}</Notice>
-      <Button title="Crear cuenta" onPress={submit} loading={busy} />
-      <Text style={styles.disclaimer}>
-        Al crear tu cuenta aceptas el aviso de privacidad y los términos de {BRAND_NAME} (documentos pendientes de redactar antes del lanzamiento).
-      </Text>
-      <Button title="Ya tengo cuenta" variant="outline" onPress={() => navigation.replace('Login')} />
-    </Screen>
+    <SafeAreaView style={authStyles.safe} edges={['top']}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView style={{ backgroundColor: colors.white }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 40 }}>
+          <AuthHeader subtitle="Crea tu cuenta" onBack={navigation.canGoBack() ? () => navigation.goBack() : null} />
+          <View style={authStyles.form}>
+            <Text style={authStyles.muted}>Tu cuenta de {BRAND_NAME} sirve para contratar y también para ofrecer servicios.</Text>
+            <Field icon="person-outline" label="Nombre completo" value={form.displayName} onChangeText={set('displayName')} error={errors.displayName} maxLength={LIMITS.name} autoComplete="name" textContentType="name" />
+            <Field icon="mail-outline" label="Correo electrónico" value={form.email} onChangeText={set('email')} error={errors.email} autoCapitalize="none" keyboardType="email-address" autoComplete="email" textContentType="emailAddress" />
+            <Field icon="lock-closed-outline" label="Contraseña" value={form.password} onChangeText={set('password')} error={errors.password} secureTextEntry autoComplete="new-password" textContentType="newPassword" hint="Mínimo 8 caracteres, con letras y números." />
+            <Field icon="lock-closed-outline" label="Repite la contraseña" value={form.password2} onChangeText={set('password2')} error={errors.password2} secureTextEntry />
+            <Field icon="call-outline" label="Teléfono (opcional)" value={form.phone} onChangeText={set('phone')} error={errors.phone} keyboardType="phone-pad" maxLength={LIMITS.phone} hint="10 dígitos. Solo se comparte con quien atienda tus pedidos." />
+            <Field icon="location-outline" label="Colonia en General Zuazua (opcional)" value={form.colonia} onChangeText={set('colonia')} maxLength={LIMITS.colonia} />
+            <Notice tone="error">{error}</Notice>
+            <Button title="Registrarse" onPress={submit} loading={busy} />
+            <Text style={styles.disclaimer}>
+              Al crear tu cuenta aceptas el aviso de privacidad y los términos de {BRAND_NAME} (documentos pendientes de redactar antes del lanzamiento).
+            </Text>
+            <View style={authStyles.bottom}>
+              <Text style={authStyles.bottomText}>¿Ya tienes cuenta? </Text>
+              <Pressable onPress={() => navigation.replace('Login')} accessibilityRole="button">
+                <Text style={authStyles.link}>Inicia sesión</Text>
+              </Pressable>
+            </View>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }

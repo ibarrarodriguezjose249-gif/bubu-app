@@ -1,7 +1,8 @@
 // El proveedor manda (o edita) su oferta a un pedido abierto.
 import React, { useEffect, useState } from 'react';
 import { Text } from 'react-native';
-import { Button, Card, Field, Loading, Notice, Screen, styles } from '../../components/ui';
+import { Button, Card, Field, IconLine, Loading, Notice, Screen, styles } from '../../components/ui';
+import { colors } from '../../constants/brand';
 import { ChipGroup } from '../../components/cards';
 import { useAuth } from '../../context/AuthContext';
 import { FULFILLMENT_MODES } from '../../constants/catalog';
@@ -58,12 +59,12 @@ export default function MakeOfferScreen({ navigation, route }) {
   return (
     <Screen>
       <Text style={styles.title}>{existing ? 'Editar mi oferta' : 'Mandar oferta'}</Text>
-      {state === 'open' ? <Text style={styles.muted}>⏱ Quedan {countdown(request.expiresAt, now)} para ofertar</Text> : <Notice tone="warn">Este pedido ya no recibe ofertas.</Notice>}
-      {!provider?.isAvailable && !existing && <Notice tone="warn">Activa "Estoy disponible" en Inicio para poder ofertar.</Notice>}
+      {state === 'open' ? <IconLine icon="time-outline" color={colors.blue}>Quedan {countdown(request.expiresAt, now)} para ofertar</IconLine> : <Notice tone="warn">Este pedido ya no recibe ofertas.</Notice>}
+      {!provider?.isAvailable && !existing && <Notice tone="warn">Toca "Conectarme" en Inicio para poder ofertar.</Notice>}
 
       <Card>
         <Text style={styles.section}>{requestSummary(request)}</Text>
-        <Text style={styles.muted}>📍 {request.colonia} · {FULFILLMENT_MODES[request.fulfillmentMode]?.label}{request.whenText ? ` · ${request.whenText}` : ''}</Text>
+        <IconLine icon="location-outline">{request.colonia} · {FULFILLMENT_MODES[request.fulfillmentMode]?.label}{request.whenText ? ` · ${request.whenText}` : ''}</IconLine>
         <Text style={styles.muted}>Los datos de contacto del cliente se comparten solo si te elige.</Text>
       </Card>
 

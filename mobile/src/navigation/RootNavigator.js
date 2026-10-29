@@ -1,13 +1,16 @@
-// Navegación: sin sesión → bienvenida/login/registro.
-// Con sesión → pestañas (Inicio, Pedidos, Perfil) + pantallas secundarias.
-import React from 'react';
-import { Text } from 'react-native';
+// Navegación (como Uber):
+// - Sin sesión → Bienvenida → Iniciar sesión / Registrarse / Recuperar contraseña.
+// - Con sesión guardada → entra directo a la app (Firebase Authentication recuerda la sesión).
+// - La primera vez en cada modo (cliente / proveedor) aparece el tutorial (se puede omitir).
+import React, { useEffect, useState } from 'react';
 import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useAuth } from '../context/AuthContext';
-import { BRAND_NAME, colors } from '../constants/brand';
+import { BRAND_NAME, colors, fonts } from '../constants/brand';
 import { Loading } from '../components/ui';
+import Icon from '../components/Icon';
+import { tutorialSeen } from '../lib/tutorial';
 
 import WelcomeScreen from '../screens/auth/WelcomeScreen';
 import LoginScreen from '../screens/auth/LoginScreen';
@@ -26,6 +29,7 @@ import CategoryProvidersScreen from '../screens/client/CategoryProvidersScreen';
 import DirectBookingScreen from '../screens/client/DirectBookingScreen';
 import OrderDetailScreen from '../screens/common/OrderDetailScreen';
 import MakeOfferScreen from '../screens/provider/MakeOfferScreen';
+import TutorialScreen from '../screens/common/TutorialScreen';
 import { ProfileMissingScreen, SuspendedScreen } from '../screens/common/SystemScreens';
 
 const Stack = createNativeStackNavigator();
@@ -38,13 +42,14 @@ const theme = {
 
 const stackOptions = {
   headerTintColor: colors.blue,
-  headerTitleStyle: { color: colors.ink, fontWeight: '800' },
+  headerTitleStyle: { color: colors.ink, fontFamily: fonts.bold, fontSize: 17 },
   headerBackTitle: 'Atrás',
+  headerShadowVisible: false,
+  headerStyle: { backgroundColor: colors.white },
+  contentStyle: { backgroundColor: colors.bg },
 };
 
-function TabIcon({ glyph, focused }) {
-  return <Text style={{ fontSize: 19, opacity: focused ? 1 : 0.55 }}>{glyph}</Text>;
-}
+const TAB_ICONS = { Inicio: 'home', Pedidos: 'receipt', Perfil: 'person' };
 
 function HomeByMode(props) {
   const { mode } = useAuth();
@@ -54,33 +59,46 @@ function HomeByMode(props) {
 function MainTabs() {
   return (
     <Tab.Navigator
-      screenOptions={{
+      screenOptions={({ route }) => ({
         headerShown: false,
         tabBarActiveTintColor: colors.blue,
-        tabBarInactiveTintColor: '#68768e',
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '700' },
-      }}
+        tabBarInactiveTintColor: '#8A96A8',
+        tabBarLabelStyle: { fontSize: 11, fontFamily: fonts.semibold },
+        tabBarStyle: { borderTopColor: colors.border, backgroundColor: colors.white },
+        tabBarIcon: ({ focused, color }) => <Icon name={`${TAB_ICONS[route.name]}${focused ? '' : '-outline'}`} size={23} color={color} />,
+      })}
     >
-      <Tab.Screen name="Inicio" component={HomeByMode} options={{ tabBarIcon: (p) => <TabIcon glyph="⌂" {...p} /> }} />
-      <Tab.Screen name="Pedidos" component={OrdersScreen} options={{ tabBarIcon: (p) => <TabIcon glyph="🧾" {...p} /> }} />
-      <Tab.Screen name="Perfil" component={ProfileScreen} options={{ tabBarIcon: (p) => <TabIcon glyph="👤" {...p} /> }} />
+      <Tab.Screen name="Inicio" component={HomeByMode} />
+      <Tab.Screen name="Pedidos" component={OrdersScreen} />
+      <Tab.Screen name="Perfil" component={ProfileScreen} />
     </Tab.Navigator>
   );
 }
 
 export default function RootNavigator() {
-  const { loading, user, profile } = useAuth();
+  const { loading, user, profile, mode } = useAuth();
+
+  // ¿Ya vio el tutorial de este modo? null = consultando.
+  const [seen, setSeen] = useState(null);
+  const uid = user?.uid;
+  useEffect(() => {
+    let alive = true;
+    setSeen(null);
+    if (!uid) return undefined;
+    tutorialSeen(uid, mode).then((v) => alive && setSeen(v));
+    return () => { alive = false; };
+  }, [uid, mode]);
 
   if (loading) return <Loading text={`Abriendo ${BRAND_NAME}…`} />;
 
   let content;
   if (!user) {
     content = (
-      <Stack.Navigator screenOptions={stackOptions}>
-        <Stack.Screen name="Welcome" component={WelcomeScreen} options={{ headerShown: false }} />
-        <Stack.Screen name="Login" component={LoginScreen} options={{ title: 'Iniciar sesión' }} />
-        <Stack.Screen name="Register" component={RegisterScreen} options={{ title: 'Crear cuenta' }} />
-        <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} options={{ title: 'Recuperar contraseña' }} />
+      <Stack.Navigator screenOptions={{ ...stackOptions, headerShown: false }}>
+        <Stack.Screen name="Welcome" component={WelcomeScreen} />
+        <Stack.Screen name="Login" component={LoginScreen} />
+        <Stack.Screen name="Register" component={RegisterScreen} />
+        <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
       </Stack.Navigator>
     );
   } else if (!profile) {
@@ -95,6 +113,11 @@ export default function RootNavigator() {
         <Stack.Screen name="Suspended" component={SuspendedScreen} options={{ headerShown: false }} />
       </Stack.Navigator>
     );
+  } else if (seen === null) {
+    return <Loading text={`Abriendo ${BRAND_NAME}…`} />;
+  } else if (!seen) {
+    // Primera vez en este modo: tutorial (con opción de omitir).
+    return <TutorialScreen mode={mode} onFinish={() => setSeen(true)} />;
   } else {
     content = (
       <Stack.Navigator screenOptions={stackOptions}>
@@ -108,6 +131,7 @@ export default function RootNavigator() {
         <Stack.Screen name="DirectBooking" component={DirectBookingScreen} options={{ title: 'Reservar' }} />
         <Stack.Screen name="OrderDetail" component={OrderDetailScreen} options={{ title: 'Pedido' }} />
         <Stack.Screen name="MakeOffer" component={MakeOfferScreen} options={{ title: 'Oferta' }} />
+        <Stack.Screen name="Tutorial" component={TutorialScreen} options={{ headerShown: false, presentation: 'modal' }} />
       </Stack.Navigator>
     );
   }

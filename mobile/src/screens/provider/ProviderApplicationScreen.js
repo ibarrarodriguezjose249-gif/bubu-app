@@ -82,14 +82,14 @@ export default function ProviderApplicationScreen({ navigation }) {
       {!loading && activeZones.length === 0 && <Notice tone="warn">No hay zonas activas todavía.</Notice>}
       <View style={styles.wrap}>
         {activeZones.map((z) => (
-          <Chip key={z.id} label={`📍 ${z.name}`} selected={form.zoneIds.includes(z.id)} onPress={() => setForm({ ...form, zoneIds: toggle(form.zoneIds, z.id) })} />
+          <Chip key={z.id} label={z.name} selected={form.zoneIds.includes(z.id)} onPress={() => setForm({ ...form, zoneIds: toggle(form.zoneIds, z.id) })} />
         ))}
       </View>
 
       <Text style={[styles.label, { marginTop: 10 }]}>Modalidad</Text>
       <View style={styles.wrap}>
         {Object.entries(FULFILLMENT_MODES).map(([key, m]) => (
-          <Chip key={key} label={`${m.icon} ${m.providerLabel}`} selected={form.fulfillmentModes.includes(key)} onPress={() => setForm({ ...form, fulfillmentModes: toggle(form.fulfillmentModes, key) })} />
+          <Chip key={key} label={m.providerLabel} selected={form.fulfillmentModes.includes(key)} onPress={() => setForm({ ...form, fulfillmentModes: toggle(form.fulfillmentModes, key) })} />
         ))}
       </View>
 

@@ -47,7 +47,7 @@ export default function NewRequestScreen({ navigation, route }) {
 
   return (
     <Screen>
-      <Text style={styles.title}>{category?.icon || '🧺'} Publicar pedido</Text>
+      <Text style={styles.title}>Publicar pedido</Text>
       <Text style={styles.muted}>Las lavanderías disponibles de tu zona te mandarán su precio y horario durante {OFFER_WINDOW_MIN} minutos. Tú eliges la que más te guste.</Text>
 
       <Text style={[styles.label, { marginTop: 20 }]}>¿Qué necesitas?</Text>
@@ -62,7 +62,7 @@ export default function NewRequestScreen({ navigation, route }) {
       <Text style={[styles.label, { marginTop: 14 }]}>¿Cómo la entregas?</Text>
       <ChipGroup
         options={Object.keys(FULFILLMENT_MODES)}
-        labels={Object.fromEntries(Object.entries(FULFILLMENT_MODES).map(([k, m]) => [k, `${m.icon} ${m.label}`]))}
+        labels={Object.fromEntries(Object.entries(FULFILLMENT_MODES).map(([k, m]) => [k, m.label]))}
         value={form.fulfillmentMode}
         onChange={set('fulfillmentMode')}
       />
@@ -71,7 +71,7 @@ export default function NewRequestScreen({ navigation, route }) {
       <Field label="Detalles (opcional)" value={form.description} onChangeText={set('description')} multiline maxLength={LIMITS.description} placeholder="Ej. ropa de bebé con jabón neutro, 2 cobijas matrimoniales…" />
 
       <Card>
-        <Text style={styles.text}>💵 BÜBÜ no cobra dentro de la app. El precio de cada oferta es un estimado y el pago se acuerda directo con la lavandería.</Text>
+        <Text style={styles.text}>BÜBÜ no cobra dentro de la app. El precio de cada oferta es un estimado y el pago se acuerda directo con la lavandería.</Text>
       </Card>
       <Notice tone="error">{error}</Notice>
       <Button title="Publicar y recibir ofertas" onPress={submit} loading={busy} />

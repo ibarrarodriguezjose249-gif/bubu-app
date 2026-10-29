@@ -10,7 +10,7 @@ import { toMillis } from '../lib/time';
 
 export const PROVIDER_STATUS = {
   pending: { label: 'En revisión', tone: 'warn', text: `El equipo de ${BRAND_NAME} está revisando tu solicitud. Aquí verás el cambio cuando la aprueben.` },
-  approved: { label: 'Aprobado', tone: 'success', text: 'Tu perfil está aprobado. Activa "Estoy disponible" para ver pedidos de tu zona y mandar ofertas.' },
+  approved: { label: 'Aprobado', tone: 'success', text: 'Tu perfil está aprobado. Toca "Conectarme" para ver pedidos de tu zona y mandar ofertas.' },
   rejected: { label: 'No aprobado', tone: 'error', text: 'Tu solicitud no fue aprobada. Revisa la nota, corrige y vuelve a enviarla.' },
   suspended: { label: 'Suspendido', tone: 'error', text: `Tu perfil está suspendido. Contacta a soporte de ${BRAND_NAME}.` },
 };
