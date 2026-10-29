@@ -20,6 +20,12 @@ import ProviderApplicationScreen from '../screens/provider/ProviderApplicationSc
 import ProfileScreen from '../screens/common/ProfileScreen';
 import EditProfileScreen from '../screens/common/EditProfileScreen';
 import AdminToolsScreen from '../screens/admin/AdminToolsScreen';
+import NewRequestScreen from '../screens/client/NewRequestScreen';
+import RequestDetailScreen from '../screens/client/RequestDetailScreen';
+import CategoryProvidersScreen from '../screens/client/CategoryProvidersScreen';
+import DirectBookingScreen from '../screens/client/DirectBookingScreen';
+import OrderDetailScreen from '../screens/common/OrderDetailScreen';
+import MakeOfferScreen from '../screens/provider/MakeOfferScreen';
 import { ProfileMissingScreen, SuspendedScreen } from '../screens/common/SystemScreens';
 
 const Stack = createNativeStackNavigator();
@@ -96,6 +102,12 @@ export default function RootNavigator() {
         <Stack.Screen name="ProviderApplication" component={ProviderApplicationScreen} options={{ title: 'Solicitud de proveedor' }} />
         <Stack.Screen name="EditProfile" component={EditProfileScreen} options={{ title: 'Editar datos' }} />
         <Stack.Screen name="AdminTools" component={AdminToolsScreen} options={{ title: 'Administrador' }} />
+        <Stack.Screen name="NewRequest" component={NewRequestScreen} options={{ title: 'Publicar pedido' }} />
+        <Stack.Screen name="RequestDetail" component={RequestDetailScreen} options={{ title: 'Tu pedido' }} />
+        <Stack.Screen name="CategoryProviders" component={CategoryProvidersScreen} options={{ title: 'Proveedores' }} />
+        <Stack.Screen name="DirectBooking" component={DirectBookingScreen} options={{ title: 'Reservar' }} />
+        <Stack.Screen name="OrderDetail" component={OrderDetailScreen} options={{ title: 'Pedido' }} />
+        <Stack.Screen name="MakeOffer" component={MakeOfferScreen} options={{ title: 'Oferta' }} />
       </Stack.Navigator>
     );
   }

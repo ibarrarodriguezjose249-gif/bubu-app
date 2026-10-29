@@ -7,7 +7,7 @@
 // administrativo o la consola de Firebase) y marcarlo `active: true`.
 
 export const INITIAL_CATEGORIES = [
-  { id: 'lavanderia', name: 'Lavandería', icon: '🧺', description: 'Lavado, secado, doblado y planchado', active: true, order: 1 },
+  { id: 'lavanderia', name: 'Lavandería', icon: '🧺', description: 'Lavado, secado, doblado y planchado', active: true, order: 1, serviceOptions: ['Lavar', 'Secar', 'Doblar', 'Planchar', 'Edredones / cobijas'] },
   { id: 'limpieza', name: 'Limpieza', icon: '🧽', description: 'Limpieza de casas y espacios', active: false, order: 2 },
   { id: 'reparaciones', name: 'Reparaciones', icon: '🛠️', description: 'Arreglos y mantenimiento del hogar', active: false, order: 3 },
   { id: 'jardineria', name: 'Jardinería', icon: '🌿', description: 'Cuidado de patios y jardines', active: false, order: 4 },
