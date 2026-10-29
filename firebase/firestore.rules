@@ -73,6 +73,10 @@ service cloud.firestore {
       return v is list && v.size() >= 1 && v.size() <= maxItems;
     }
     function updatedNowIfPresent(d) { return !('updatedAt' in d) || d.updatedAt == request.time; }
+    // En actualizaciones: si cambia updatedAt, debe ser la hora del servidor.
+    function updatedNowIfChanged() {
+      return !('updatedAt' in changedKeys()) || request.resource.data.updatedAt == request.time;
+    }
 
     // ───────────── Administradores ─────────────
     // Se crean A MANO en la consola: admins/{UID} con { role: 'superadmin' }.
@@ -107,7 +111,7 @@ service cloud.firestore {
         && optStr(d, 'colonia', 80)
         && optStr(d, 'zoneId', 60)
         && d.activeMode in ['client', 'provider']
-        && updatedNowIfPresent(d);
+        && updatedNowIfChanged();
     }
 
     function validAdminUserUpdate() {
@@ -130,6 +134,8 @@ service cloud.firestore {
     // ───────────── Proveedores (id del documento = UID) ─────────────
     function validProviderFields(d) {
       return isStr(d.businessName, 2, 80)
+        // Negocio establecido o persona que trabaja desde casa.
+        && (!('providerType' in d) || d.providerType in ['business', 'home'])
         && optStr(d, 'description', 500)
         && isIdList(d.categoryIds, 10)
         && isIdList(d.zoneIds, 5)
@@ -137,7 +143,7 @@ service cloud.firestore {
     }
 
     function validProviderCreate(d) {
-      return d.keys().hasOnly(['businessName', 'description', 'categoryIds', 'zoneIds', 'fulfillmentModes', 'status', 'reviewNote', 'createdAt', 'updatedAt'])
+      return d.keys().hasOnly(['businessName', 'description', 'providerType', 'categoryIds', 'zoneIds', 'fulfillmentModes', 'status', 'reviewNote', 'createdAt', 'updatedAt'])
         && validProviderFields(d)
         && categoryActive(d.categoryIds[0])
         && zoneActive(d.zoneIds[0])
@@ -151,11 +157,14 @@ service cloud.firestore {
       let d = request.resource.data;
       let old = resource.data;
       return old.status != 'suspended'
-        && changedKeys().hasOnly(['businessName', 'description', 'categoryIds', 'zoneIds', 'fulfillmentModes', 'status', 'updatedAt'])
+        && changedKeys().hasOnly(['businessName', 'description', 'providerType', 'categoryIds', 'zoneIds', 'fulfillmentModes', 'status', 'isAvailable', 'lastSeenAt', 'updatedAt'])
         && validProviderFields(d)
         // El estado no cambia, salvo reenviar una solicitud rechazada.
         && (d.status == old.status || (old.status == 'rejected' && d.status == 'pending'))
-        && updatedNowIfPresent(d);
+        // Disponibilidad ("Estoy disponible") y última conexión.
+        && (!('isAvailable' in d) || d.isAvailable is bool)
+        && (!('lastSeenAt' in changedKeys()) || d.lastSeenAt == request.time)
+        && updatedNowIfChanged();
     }
 
     function validProviderAdminUpdate() {
@@ -229,26 +238,37 @@ service cloud.firestore {
     }
 
     // ───────────── Solicitudes abiertas ("no encuentro lo que busco") ─────────────
+    // Un pedido publicado NO lleva nombre, teléfono ni dirección del cliente:
+    // solo colonia y qué necesita. Los datos de contacto se comparten únicamente
+    // con el proveedor elegido, dentro del pedido (orders).
     function validRequestCreate(d) {
-      return d.keys().hasOnly(['customerId', 'customerName', 'categoryId', 'zoneId', 'colonia', 'description', 'fulfillmentMode', 'preferredDate', 'status', 'createdAt', 'updatedAt'])
+      return d.keys().hasOnly(['customerId', 'customerName', 'categoryId', 'zoneId', 'colonia', 'description', 'services', 'quantityText', 'whenText', 'fulfillmentMode', 'preferredDate', 'expiresAt', 'status', 'createdAt', 'updatedAt'])
         && d.customerId == me()
-        && isStr(d.customerName, 1, 80)
+        && optStr(d, 'customerName', 80)
         && categoryActive(d.categoryId)
         && zoneActive(d.zoneId)
         && isStr(d.colonia, 1, 80)
-        && isStr(d.description, 5, 500)
+        && optStr(d, 'description', 500)
+        && (!('services' in d) || (d.services is list && d.services.size() <= 8))
+        && (isStr(d.get('description', ''), 3, 500) || (d.get('services', []).size() > 0))
+        && optStr(d, 'quantityText', 40)
+        && optStr(d, 'whenText', 40)
         && d.fulfillmentMode in ['dropoff', 'pickup_delivery']
         && (!('preferredDate' in d) || d.preferredDate is timestamp)
+        // Recibe ofertas durante ~30 minutos (margen por diferencia de reloj del teléfono).
+        && d.expiresAt is timestamp
+        && d.expiresAt > request.time + duration.value(20, 'm')
+        && d.expiresAt < request.time + duration.value(40, 'm')
         && d.status == 'open'
         && d.createdAt == request.time
         && updatedNowIfPresent(d);
     }
 
     function providerCanSeeRequest(r) {
-      // Ojo: para consultas (list), cada condición debe estar garantizada por
-      // los filtros de la consulta (status, categoryId y zoneId con ==).
+      // Los proveedores aprobados de esa categoría y zona ven los pedidos
+      // (abiertos y pasados) para ofertar y para ver "los que se perdieron".
+      // Ojo: en consultas, categoryId y zoneId deben filtrarse con ==.
       return isApprovedProvider()
-        && r.status == 'open'
         && r.categoryId in providerData(me()).categoryIds
         && r.zoneId in providerData(me()).zoneIds;
     }
@@ -257,10 +277,23 @@ service cloud.firestore {
       allow get, list: if signedIn() && (resource.data.customerId == me() || providerCanSeeRequest(resource.data) || isAdmin());
       allow create: if isActiveUser() && validRequestCreate(request.resource.data);
       allow update: if signedIn() && (
+        // El cliente cancela o cierra su pedido abierto…
         (resource.data.customerId == me()
           && resource.data.status == 'open'
           && changedKeys().hasOnly(['status', 'updatedAt'])
           && request.resource.data.status in ['closed', 'cancelled'])
+        // …o elige una oferta que existe (queda "assigned").
+        || (resource.data.customerId == me()
+          && resource.data.status == 'open'
+          && changedKeys().hasOnly(['status', 'chosenProviderId', 'orderId', 'updatedAt'])
+          && request.resource.data.status == 'assigned'
+          && request.resource.data.chosenProviderId is string
+          && isStr(request.resource.data.orderId, 1, 128)
+          && exists(/databases/$(database)/documents/requests/$(requestId)/offers/$(request.resource.data.chosenProviderId))
+          // El pedido (orders) debe crearse en el MISMO paso, ligado a esta solicitud y a ese proveedor.
+          && existsAfter(/databases/$(database)/documents/orders/$(request.resource.data.orderId))
+          && getAfter(/databases/$(database)/documents/orders/$(request.resource.data.orderId)).data.requestId == requestId
+          && getAfter(/databases/$(database)/documents/orders/$(request.resource.data.orderId)).data.providerId == request.resource.data.chosenProviderId)
         || (isAdmin() && changedKeys().hasOnly(['status', 'updatedAt'])
           && request.resource.data.status in ['open', 'closed', 'cancelled'])
       );
@@ -276,18 +309,35 @@ service cloud.firestore {
         allow list: if signedIn() && (parentRequest().customerId == me() || isAdmin());
         allow create: if isApprovedProvider()
           && offerProviderId == me()
+          // Solo proveedores con "Estoy disponible" activado…
+          && providerData(me()).get('isAvailable', false) == true
+          // …de la categoría y zona del pedido, y que ofrezcan la modalidad pedida.
+          && parentRequest().categoryId in providerData(me()).categoryIds
+          && parentRequest().zoneId in providerData(me()).zoneIds
+          && parentRequest().fulfillmentMode in providerData(me()).fulfillmentModes
           && parentRequest().status == 'open'
+          && (!('expiresAt' in parentRequest()) || request.time < parentRequest().expiresAt)
           && parentRequest().customerId != me()
-          && request.resource.data.keys().hasOnly(['providerId', 'providerName', 'message', 'priceFrom', 'createdAt', 'updatedAt'])
+          && request.resource.data.keys().hasOnly(['providerId', 'providerName', 'providerType', 'kind', 'message', 'priceFrom', 'pickupText', 'readyText', 'providerPhone', 'createdAt', 'updatedAt'])
+          // kind: 'accept' = acepta el horario del cliente; 'offer' = propone precio/horario.
+          && (!('kind' in request.resource.data) || request.resource.data.kind in ['accept', 'offer'])
+          && (!('providerType' in request.resource.data) || request.resource.data.providerType in ['business', 'home'])
           && request.resource.data.providerId == me()
           && isStr(request.resource.data.providerName, 1, 80)
-          && isStr(request.resource.data.message, 1, 500)
+          && optStr(request.resource.data, 'message', 500)
+          && optStr(request.resource.data, 'pickupText', 60)
+          && optStr(request.resource.data, 'readyText', 60)
+          && optStr(request.resource.data, 'providerPhone', 20)
           && (!('priceFrom' in request.resource.data) || isPrice(request.resource.data.priceFrom))
           && request.resource.data.createdAt == request.time;
         allow update: if signedIn() && offerProviderId == me()
           && parentRequest().status == 'open'
-          && changedKeys().hasOnly(['message', 'priceFrom', 'updatedAt'])
-          && isStr(request.resource.data.message, 1, 500)
+          && (!('expiresAt' in parentRequest()) || request.time < parentRequest().expiresAt)
+          && changedKeys().hasOnly(['message', 'priceFrom', 'pickupText', 'readyText', 'providerPhone', 'updatedAt'])
+          && optStr(request.resource.data, 'message', 500)
+          && optStr(request.resource.data, 'pickupText', 60)
+          && optStr(request.resource.data, 'readyText', 60)
+          && optStr(request.resource.data, 'providerPhone', 20)
           && (!('priceFrom' in request.resource.data) || isPrice(request.resource.data.priceFrom));
         allow delete: if signedIn() && (offerProviderId == me() || isAdmin());
       }
@@ -313,8 +363,8 @@ service cloud.firestore {
       return ['requested', 'accepted', 'rejected', 'in_progress', 'ready', 'delivered', 'cancelled', 'disputed'];
     }
 
-    function validOrderCreate(d) {
-      return d.keys().hasOnly(['customerId', 'providerId', 'serviceId', 'requestId', 'categoryId', 'zoneId', 'customerName', 'providerName', 'details', 'fulfillmentMode', 'colonia', 'address', 'customerPhone', 'scheduledAt', 'priceEstimate', 'status', 'createdAt', 'updatedAt', 'statusChangedAt'])
+    function validOrderCreate(d, orderId) {
+      return d.keys().hasOnly(['customerId', 'providerId', 'serviceId', 'requestId', 'categoryId', 'zoneId', 'customerName', 'providerName', 'details', 'fulfillmentMode', 'colonia', 'address', 'customerPhone', 'providerPhone', 'agreedPickup', 'agreedReady', 'scheduledAt', 'whenText', 'priceEstimate', 'status', 'createdAt', 'updatedAt', 'statusChangedAt'])
         && d.keys().hasAll(['customerId', 'providerId', 'categoryId', 'zoneId', 'customerName', 'details', 'fulfillmentMode', 'colonia', 'status', 'createdAt'])
         && d.customerId == me()
         && d.providerId is string
@@ -331,6 +381,10 @@ service cloud.firestore {
         // Domicilio obligatorio solo si el proveedor pasa a recoger.
         && (d.fulfillmentMode == 'pickup_delivery' ? isStr(d.address, 5, 200) : optStr(d, 'address', 200))
         && optStr(d, 'customerPhone', 20)
+        && optStr(d, 'providerPhone', 20)
+        && optStr(d, 'agreedPickup', 60)
+        && optStr(d, 'agreedReady', 60)
+        && optStr(d, 'whenText', 40)
         && (!('scheduledAt' in d) || (d.scheduledAt is timestamp && d.scheduledAt > request.time))
         && (!('priceEstimate' in d) || isPrice(d.priceEstimate))
         && optStr(d, 'requestId', 128)
@@ -338,9 +392,24 @@ service cloud.firestore {
               exists(/databases/$(database)/documents/services/$(d.serviceId))
               && get(/databases/$(database)/documents/services/$(d.serviceId)).data.providerId == d.providerId
               && get(/databases/$(database)/documents/services/$(d.serviceId)).data.active == true))
-        && d.status == 'requested'
+        // Reserva directa: nace "requested" y el proveedor acepta o rechaza.
+        // Desde una oferta elegida: nace "accepted" (el proveedor ya se ofreció).
+        && (d.status == 'requested' || (d.status == 'accepted' && orderFromMyOffer(d, orderId)))
         && d.createdAt == request.time
         && updatedNowIfPresent(d);
+    }
+
+    // Pedido nacido de una oferta: la solicitud debía estar abierta y, en el mismo
+    // paso, queda "assigned" apuntando a ESTE pedido y a ESTE proveedor.
+    // Así es imposible que dos proveedores se queden con la misma solicitud.
+    function orderFromMyOffer(d, orderId) {
+      return 'requestId' in d
+        && get(/databases/$(database)/documents/requests/$(d.requestId)).data.customerId == me()
+        && get(/databases/$(database)/documents/requests/$(d.requestId)).data.status == 'open'
+        && exists(/databases/$(database)/documents/requests/$(d.requestId)/offers/$(d.providerId))
+        && getAfter(/databases/$(database)/documents/requests/$(d.requestId)).data.status == 'assigned'
+        && getAfter(/databases/$(database)/documents/requests/$(d.requestId)).data.orderId == orderId
+        && getAfter(/databases/$(database)/documents/requests/$(d.requestId)).data.chosenProviderId == d.providerId;
     }
 
     function providerOrderUpdate() {
@@ -375,8 +444,46 @@ service cloud.firestore {
 
     match /orders/{orderId} {
       allow get, list: if signedIn() && (resource.data.customerId == me() || resource.data.providerId == me() || isAdmin());
-      allow create: if isActiveUser() && validOrderCreate(request.resource.data);
+      allow create: if isActiveUser() && validOrderCreate(request.resource.data, orderId);
       allow update: if signedIn() && (providerOrderUpdate() || customerOrderUpdate() || adminOrderUpdate());
+      allow delete: if false;
+    }
+
+    // ───────────── Calificaciones (id = id del pedido → una por pedido) ─────────────
+    // Solo el cliente del pedido, y solo cuando está "delivered". No se editan.
+    // El admin solo puede ocultarlas o mostrarlas.
+    function reviewOrder(orderId) {
+      return get(/databases/$(database)/documents/orders/$(orderId)).data;
+    }
+
+    function validReviewCreate(d, orderId) {
+      return d.keys().hasOnly(['orderId', 'providerId', 'customerId', 'customerName', 'categoryId', 'stars', 'comment', 'hidden', 'createdAt'])
+        && d.keys().hasAll(['orderId', 'providerId', 'customerId', 'stars', 'hidden', 'createdAt'])
+        && d.orderId == orderId
+        && d.customerId == me()
+        && exists(/databases/$(database)/documents/orders/$(orderId))
+        && reviewOrder(orderId).customerId == me()
+        && reviewOrder(orderId).status == 'delivered'
+        && d.providerId == reviewOrder(orderId).providerId
+        && d.stars is int && d.stars >= 1 && d.stars <= 5
+        && optStr(d, 'comment', 300)
+        && optStr(d, 'customerName', 40)
+        && optStr(d, 'categoryId', 60)
+        && d.hidden == false
+        && d.createdAt == request.time;
+    }
+
+    match /reviews/{orderId} {
+      // get: también se permite consultar una reseña que aún no existe (para saber si ya calificaste).
+      allow get: if signedIn() && (resource == null || resource.data.hidden == false
+        || resource.data.customerId == me() || resource.data.providerId == me() || isAdmin());
+      allow list: if signedIn() && (resource.data.hidden == false || resource.data.providerId == me() || isAdmin());
+      allow create: if isActiveUser() && validReviewCreate(request.resource.data, orderId);
+      allow update: if isAdmin()
+        && changedKeys().hasOnly(['hidden', 'hiddenNote', 'hiddenBy', 'hiddenAt'])
+        && request.resource.data.hidden is bool
+        && optStr(request.resource.data, 'hiddenNote', 300)
+        && (!('hiddenBy' in changedKeys()) || request.resource.data.hiddenBy == me());
       allow delete: if false;
     }
 

@@ -1,0 +1,7 @@
+/*
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  X-Robots-Tag: noindex, nofollow
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+  Content-Security-Policy: default-src 'self'; script-src 'self' https://www.gstatic.com; connect-src 'self' https://*.googleapis.com https://*.firebaseapp.com https://www.gstatic.com; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-src https://*.firebaseapp.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'

@@ -88,7 +88,7 @@ async function seed() {
     for (const uid of [ANA, LUPE, PEPE, ADMIN, EVA]) {
       await setDoc(doc(db, 'users', uid), { ...userProfile(uid), createdAt: now, updatedAt: now });
     }
-    await setDoc(doc(db, 'providers', LUPE), { ...providerApp({ status: 'approved', businessName: 'Lavandería Lupe' }), createdAt: now, updatedAt: now });
+    await setDoc(doc(db, 'providers', LUPE), { ...providerApp({ status: 'approved', businessName: 'Lavandería Lupe', providerType: 'home', isAvailable: true }), createdAt: now, updatedAt: now });
     await setDoc(doc(db, 'providers', PEPE), { ...providerApp({ status: 'pending' }), createdAt: now, updatedAt: now });
     await setDoc(doc(db, 'services', 'srv-lupe'), {
       providerId: LUPE, providerName: 'Lavandería Lupe', categoryId: 'lavanderia', zoneIds: ['general-zuazua'],
@@ -318,6 +318,8 @@ describe('Solicitudes abiertas y ofertas', () => {
   const reqData = (extra = {}) => ({
     customerId: EVA, customerName: 'Eva', categoryId: 'lavanderia', zoneId: 'general-zuazua',
     colonia: 'Centro', description: 'Lavar ropa de bebé', fulfillmentMode: 'pickup_delivery',
+    services: ['Lavar', 'Doblar'], quantityText: '2–3 bolsas', whenText: 'Hoy',
+    expiresAt: Timestamp.fromMillis(Date.now() + 30 * 60 * 1000),
     status: 'open', createdAt: serverTimestamp(), updatedAt: serverTimestamp(), ...extra,
   });
   it('cliente publica solicitud en zona y categoría activas', async () => {
@@ -343,6 +345,110 @@ describe('Solicitudes abiertas y ofertas', () => {
   });
 });
 
+describe('Etapa 4: publicar pedido, ofertas y elegir', () => {
+  const in30 = () => Timestamp.fromMillis(Date.now() + 30 * 60 * 1000);
+  const reqBase = (extra = {}) => ({
+    customerId: ANA, categoryId: 'lavanderia', zoneId: 'general-zuazua', colonia: 'Centro',
+    description: '', services: ['Lavar'], quantityText: '1 bolsa', whenText: 'Hoy',
+    fulfillmentMode: 'dropoff', expiresAt: in30(), status: 'open',
+    createdAt: serverTimestamp(), updatedAt: serverTimestamp(), ...extra,
+  });
+  it('publica sin nombre ni teléfono, con 30 min para ofertas', async () => {
+    await assertSucceeds(addDoc(collection(ctx(ANA), 'requests'), reqBase()));
+  });
+  it('rechaza pedido sin vencimiento o con vencimiento de 2 horas', async () => {
+    const { expiresAt, ...sinVence } = reqBase();
+    await assertFails(addDoc(collection(ctx(ANA), 'requests'), sinVence));
+    await assertFails(addDoc(collection(ctx(ANA), 'requests'), reqBase({ expiresAt: Timestamp.fromMillis(Date.now() + 2 * 3600 * 1000) })));
+  });
+  it('rechaza pedido vacío (sin servicios ni descripción)', async () => {
+    await assertFails(addDoc(collection(ctx(ANA), 'requests'), reqBase({ services: [], description: '' })));
+  });
+  it('el proveedor aprobado ve pedidos pasados de su zona (para "te perdiste")', async () => {
+    await env.withSecurityRulesDisabled((c) => updateDoc(doc(c.firestore(), 'requests', 'req-1'), { status: 'assigned' }));
+    const q = query(collection(ctx(LUPE), 'requests'), where('categoryId', '==', 'lavanderia'), where('zoneId', '==', 'general-zuazua'));
+    await assertSucceeds(getDocs(q));
+  });
+  it('no se puede ofertar a un pedido vencido', async () => {
+    await env.withSecurityRulesDisabled((c) => updateDoc(doc(c.firestore(), 'requests', 'req-1'), { expiresAt: Timestamp.fromMillis(Date.now() - 60 * 1000) }));
+    const offer = { providerId: LUPE, providerName: 'Lupe', message: 'Hoy', createdAt: serverTimestamp() };
+    await assertFails(setDoc(doc(ctx(LUPE), 'requests', 'req-1', 'offers', LUPE), offer));
+  });
+  it('el cliente elige una oferta: crea pedido aceptado y marca la solicitud', async () => {
+    const offer = { providerId: LUPE, providerName: 'Lupe', message: 'Paso a las 5', priceFrom: 120, pickupText: 'Hoy 5 pm', readyText: 'Mañana', providerPhone: '8111111111', createdAt: serverTimestamp() };
+    await assertSucceeds(setDoc(doc(ctx(LUPE), 'requests', 'req-1', 'offers', LUPE), offer));
+    const db = ctx(ANA);
+    const b = writeBatch(db);
+    const orderRef = doc(collection(db, 'orders'));
+    b.set(orderRef, newOrder({ requestId: 'req-1', status: 'accepted', priceEstimate: 120, agreedPickup: 'Hoy 5 pm', agreedReady: 'Mañana', providerPhone: '8111111111', statusChangedAt: serverTimestamp() }));
+    b.update(doc(db, 'requests', 'req-1'), { status: 'assigned', chosenProviderId: LUPE, orderId: orderRef.id, updatedAt: serverTimestamp() });
+    await assertSucceeds(b.commit());
+  });
+  it('no se puede crear pedido "aceptado" sin oferta de ese proveedor', async () => {
+    await assertFails(addDoc(collection(ctx(ANA), 'orders'), newOrder({ requestId: 'req-1', status: 'accepted' })));
+  });
+  it('no se puede marcar asignado a un proveedor que no ofertó', async () => {
+    await assertFails(updateDoc(doc(ctx(ANA), 'requests', 'req-1'), { status: 'assigned', chosenProviderId: LUPE, orderId: 'x', updatedAt: serverTimestamp() }));
+  });
+  it('el proveedor activa "Estoy disponible"', async () => {
+    await assertSucceeds(updateDoc(doc(ctx(LUPE), 'providers', LUPE), { isAvailable: true, lastSeenAt: serverTimestamp(), updatedAt: serverTimestamp() }));
+    await assertFails(updateDoc(doc(ctx(LUPE), 'providers', LUPE), { isAvailable: 'sí' }));
+    await assertFails(updateDoc(doc(ctx(ANA), 'providers', LUPE), { isAvailable: false }));
+  });
+});
+
+describe('Etapa 4.1: reglas más estrictas (GPT punto 2, 4, 8, 9)', () => {
+  const offer = (extra = {}) => ({ providerId: LUPE, providerName: 'Lupe', kind: 'accept', providerType: 'home', message: 'Acepto', createdAt: serverTimestamp(), ...extra });
+  it('proveedor disponible acepta con un toque (kind accept)', async () => {
+    await assertSucceeds(setDoc(doc(ctx(LUPE), 'requests', 'req-1', 'offers', LUPE), offer()));
+  });
+  it('proveedor NO disponible no puede ofertar', async () => {
+    await env.withSecurityRulesDisabled((c) => updateDoc(doc(c.firestore(), 'providers', LUPE), { isAvailable: false }));
+    await assertFails(setDoc(doc(ctx(LUPE), 'requests', 'req-1', 'offers', LUPE), offer()));
+  });
+  it('no puede ofertar si no ofrece la modalidad pedida', async () => {
+    await env.withSecurityRulesDisabled((c) => updateDoc(doc(c.firestore(), 'providers', LUPE), { fulfillmentModes: ['pickup_delivery'] }));
+    await assertFails(setDoc(doc(ctx(LUPE), 'requests', 'req-1', 'offers', LUPE), offer()));
+  });
+  it('no puede ofertar a un pedido de otra zona', async () => {
+    await env.withSecurityRulesDisabled(async (c) => {
+      await setDoc(doc(c.firestore(), 'zones', 'otra'), { name: 'Otra zona', active: true });
+      await updateDoc(doc(c.firestore(), 'requests', 'req-1'), { zoneId: 'otra' });
+    });
+    await assertFails(setDoc(doc(ctx(LUPE), 'requests', 'req-1', 'offers', LUPE), offer()));
+  });
+  it('tipo de oferta y tipo de proveedor inválidos se rechazan', async () => {
+    await assertFails(setDoc(doc(ctx(LUPE), 'requests', 'req-1', 'offers', LUPE), offer({ kind: 'gratis' })));
+    await assertFails(setDoc(doc(ctx(LUPE), 'requests', 'req-1', 'offers', LUPE), offer({ providerType: 'empresa' })));
+  });
+  it('pedido aceptado suelto (sin marcar la solicitud en el mismo paso) se rechaza', async () => {
+    await assertSucceeds(setDoc(doc(ctx(LUPE), 'requests', 'req-1', 'offers', LUPE), offer()));
+    await assertFails(addDoc(collection(ctx(ANA), 'orders'), newOrder({ requestId: 'req-1', status: 'accepted' })));
+  });
+  it('NO se puede asignar dos veces la misma solicitud (doble proveedor)', async () => {
+    await assertSucceeds(setDoc(doc(ctx(LUPE), 'requests', 'req-1', 'offers', LUPE), offer()));
+    const db = ctx(ANA);
+    const b1 = writeBatch(db);
+    const o1 = doc(collection(db, 'orders'));
+    b1.set(o1, newOrder({ requestId: 'req-1', status: 'accepted', statusChangedAt: serverTimestamp() }));
+    b1.update(doc(db, 'requests', 'req-1'), { status: 'assigned', chosenProviderId: LUPE, orderId: o1.id, updatedAt: serverTimestamp() });
+    await assertSucceeds(b1.commit());
+    const b2 = writeBatch(db);
+    const o2 = doc(collection(db, 'orders'));
+    b2.set(o2, newOrder({ requestId: 'req-1', status: 'accepted', statusChangedAt: serverTimestamp() }));
+    b2.update(doc(db, 'requests', 'req-1'), { status: 'assigned', chosenProviderId: LUPE, orderId: o2.id, updatedAt: serverTimestamp() });
+    await assertFails(b2.commit());
+  });
+  it('la solicitud no puede apuntar a un pedido que no se creó en el mismo paso', async () => {
+    await assertSucceeds(setDoc(doc(ctx(LUPE), 'requests', 'req-1', 'offers', LUPE), offer()));
+    await assertFails(updateDoc(doc(ctx(ANA), 'requests', 'req-1'), { status: 'assigned', chosenProviderId: LUPE, orderId: 'inventado', updatedAt: serverTimestamp() }));
+  });
+  it('el proveedor guarda su tipo (negocio / desde casa)', async () => {
+    await assertSucceeds(updateDoc(doc(ctx(LUPE), 'providers', LUPE), { providerType: 'business', updatedAt: serverTimestamp() }));
+    await assertFails(updateDoc(doc(ctx(LUPE), 'providers', LUPE), { providerType: 'otro', updatedAt: serverTimestamp() }));
+  });
+});
+
 describe('Bitácora', () => {
   it('solo admin escribe y lee; nadie la modifica', async () => {
     const entry = { adminId: ADMIN, action: 'approve_provider', targetType: 'provider', targetId: PEPE, details: {}, createdAt: serverTimestamp() };
@@ -358,5 +464,50 @@ describe('Cuenta suspendida', () => {
     await env.withSecurityRulesDisabled((c) => updateDoc(doc(c.firestore(), 'users', ANA), { status: 'suspended' }));
     await assertFails(addDoc(collection(ctx(ANA), 'orders'), newOrder()));
     await assertFails(updateDoc(doc(ctx(ANA), 'users', ANA), { displayName: 'Otra' }));
+  });
+});
+
+describe('Etapa 5: calificaciones', () => {
+  const review = (extra = {}) => ({ orderId: 'ord-r', providerId: LUPE, customerId: ANA, customerName: 'Ana', categoryId: 'lavanderia', stars: 5, comment: 'Muy bien', hidden: false, createdAt: serverTimestamp(), ...extra });
+  const seedOrder = (status) => env.withSecurityRulesDisabled((c) => setDoc(doc(c.firestore(), 'orders', 'ord-r'), { ...newOrder(), status }));
+
+  it('el cliente califica un pedido ENTREGADO, una sola vez', async () => {
+    await seedOrder('delivered');
+    await assertSucceeds(setDoc(doc(ctx(ANA), 'reviews', 'ord-r'), review()));
+    await assertFails(setDoc(doc(ctx(ANA), 'reviews', 'ord-r'), review({ stars: 1 }))); // no se edita
+  });
+  it('no se califica un pedido que no está entregado', async () => {
+    await seedOrder('accepted');
+    await assertFails(setDoc(doc(ctx(ANA), 'reviews', 'ord-r'), review()));
+  });
+  it('solo el cliente del pedido; ni el proveedor ni otra persona', async () => {
+    await seedOrder('delivered');
+    await assertFails(setDoc(doc(ctx(LUPE), 'reviews', 'ord-r'), review({ customerId: LUPE })));
+    await assertFails(setDoc(doc(ctx(EVA), 'reviews', 'ord-r'), review({ customerId: EVA })));
+  });
+  it('estrellas de 1 a 5 y proveedor correcto', async () => {
+    await seedOrder('delivered');
+    await assertFails(setDoc(doc(ctx(ANA), 'reviews', 'ord-r'), review({ stars: 6 })));
+    await assertFails(setDoc(doc(ctx(ANA), 'reviews', 'ord-r'), review({ stars: 0 })));
+    await assertFails(setDoc(doc(ctx(ANA), 'reviews', 'ord-r'), review({ providerId: PEPE })));
+    await assertFails(setDoc(doc(ctx(ANA), 'reviews', 'ord-r'), review({ hidden: true })));
+  });
+  it('el admin oculta, pero no cambia las estrellas', async () => {
+    await seedOrder('delivered');
+    await assertSucceeds(setDoc(doc(ctx(ANA), 'reviews', 'ord-r'), review()));
+    await assertSucceeds(updateDoc(doc(ctx(ADMIN), 'reviews', 'ord-r'), { hidden: true, hiddenNote: 'Ofensiva', hiddenBy: ADMIN, hiddenAt: serverTimestamp() }));
+    await assertFails(updateDoc(doc(ctx(ADMIN), 'reviews', 'ord-r'), { stars: 1 }));
+    await assertFails(updateDoc(doc(ctx(LUPE), 'reviews', 'ord-r'), { hidden: true }));
+  });
+  it('lectura: visibles para todos con sesión; ocultas solo para dueños y admin', async () => {
+    await seedOrder('delivered');
+    await assertSucceeds(setDoc(doc(ctx(ANA), 'reviews', 'ord-r'), review()));
+    await assertSucceeds(getDocs(query(collection(ctx(EVA), 'reviews'), where('providerId', 'in', [LUPE]), where('hidden', '==', false))));
+    await assertSucceeds(getDoc(doc(ctx(EVA), 'reviews', 'no-existe')));
+    await updateDoc(doc(ctx(ADMIN), 'reviews', 'ord-r'), { hidden: true });
+    await assertFails(getDoc(doc(ctx(EVA), 'reviews', 'ord-r')));
+    await assertSucceeds(getDoc(doc(ctx(ANA), 'reviews', 'ord-r')));
+    await assertSucceeds(getDocs(query(collection(ctx(LUPE), 'reviews'), where('providerId', '==', LUPE))));
+    await assertFails(getDocs(collection(anon(), 'reviews')));
   });
 });

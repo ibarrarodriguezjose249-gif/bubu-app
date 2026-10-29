@@ -1,73 +1,465 @@
-// Inicio en modo proveedor: muestra el estado de la solicitud de proveedor.
-import React, { useState } from 'react';
-import { ScrollView, Text, View } from 'react-native';
+// Inicio del proveedor, estilo app de viajes ("modo Uber").
+// - Sin aprobar: estado de su solicitud.
+// - Aprobado y DESCONECTADO: botón grande "Conectarme" + sus números reales.
+// - Aprobado y CONECTADO: radar "Buscando pedidos…". Cuando llega un pedido de su
+//   zona sube una tarjeta grande y el teléfono vibra. Si el cliente lo elige,
+//   aparece "¡Te eligieron!". Todo con datos reales de Firestore.
+// Limitación: solo avisa con la app abierta (las notificaciones push son otra etapa).
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, Vibration, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useIsFocused } from '@react-navigation/native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import Hero from '../../components/Hero';
+import Radar from '../../components/Radar';
 import ModeSwitchModal from '../../components/ModeSwitchModal';
 import { Badge, Button, Card, Notice, styles } from '../../components/ui';
+import { RequestCard, StatPill } from '../../components/cards';
+import { RatingBadge } from '../../components/Rating';
 import { useAuth } from '../../context/AuthContext';
 import { useCatalog } from '../../context/CatalogContext';
-import { PROVIDER_STATUS } from '../../services/providers';
+import { PROVIDER_STATUS, heartbeat, setAvailability } from '../../services/providers';
+import { acceptRequest, getMyOffer, requestState, requestSummary, subscribeZoneRequests } from '../../services/requests';
+import { subscribeMyOrders } from '../../services/orders';
+import { ratingSummary, subscribeMyProviderReviews } from '../../services/reviews';
 import { FULFILLMENT_MODES } from '../../constants/catalog';
+import { HEARTBEAT_MS, MISSED_WINDOW_DAYS, PROVIDER_TYPES } from '../../constants/requests';
 import { BRAND_NAME, colors } from '../../constants/brand';
+import { countdown, toMillis, timeAgo, useNow } from '../../lib/time';
+import { friendlyError } from '../../lib/errors';
+import { keepScreenOn } from '../../lib/keepAwake';
+
+const ACTIVE_ORDER = ['requested', 'accepted', 'in_progress', 'ready'];
+const vibrate = (pattern) => { try { Vibration.vibrate(pattern); } catch (e) { /* sin vibración */ } };
+
+function ApplicationStatus({ provider, navigation }) {
+  const { categoryById, zoneById } = useCatalog();
+  if (!provider) {
+    return (
+      <Card>
+        <Text style={styles.section}>Ofrece tus servicios en {BRAND_NAME}</Text>
+        <Text style={styles.muted}>Envía tu solicitud. El equipo de {BRAND_NAME} la revisa y, cuando la apruebe, podrás recibir pedidos y mandar ofertas.</Text>
+        <Button title="Comenzar solicitud" onPress={() => navigation.navigate('ProviderApplication')} />
+      </Card>
+    );
+  }
+  const st = PROVIDER_STATUS[provider.status] || PROVIDER_STATUS.pending;
+  return (
+    <Card>
+      <View style={styles.row}>
+        <Text style={[styles.section, { flex: 1 }]} numberOfLines={2}>{provider.businessName}</Text>
+        <Badge tone={st.tone}>{st.label}</Badge>
+      </View>
+      {provider.status !== 'approved' && <Notice tone={st.tone}>{st.text}</Notice>}
+      {!!provider.reviewNote && <Notice tone="info">Nota del equipo: {provider.reviewNote}</Notice>}
+      <Text style={[styles.muted, { marginTop: 12 }]}>
+        {(provider.categoryIds || []).map((id) => categoryById(id)?.name || id).join(', ')} · {(provider.zoneIds || []).map((id) => zoneById(id)?.name || id).join(', ')}
+      </Text>
+      <Text style={styles.muted}>{(provider.fulfillmentModes || []).map((m) => FULFILLMENT_MODES[m]?.providerLabel || m).join(' · ')}</Text>
+      {!!PROVIDER_TYPES[provider.providerType] && <Text style={styles.muted}>{PROVIDER_TYPES[provider.providerType].badge}</Text>}
+      {provider.status !== 'suspended' && (
+        <Button title={provider.status === 'rejected' ? 'Corregir y reenviar' : 'Editar perfil de proveedor'} variant="outline" onPress={() => navigation.navigate('ProviderApplication')} />
+      )}
+    </Card>
+  );
+}
+
+function elapsed(ms) {
+  const m = Math.max(0, Math.floor(ms / 60000));
+  if (m < 60) return `${m} min`;
+  return `${Math.floor(m / 60)} h ${m % 60} min`;
+}
 
 export default function ProviderHomeScreen({ navigation }) {
-  const { provider } = useAuth();
-  const { categoryById, zoneById } = useCatalog();
+  const { user, provider, profile } = useAuth();
+  const { zoneById } = useCatalog();
+  const [accepting, setAccepting] = useState('');
   const [modeOpen, setModeOpen] = useState(false);
-  const st = provider ? PROVIDER_STATUS[provider.status] || PROVIDER_STATUS.pending : null;
+  const [requests, setRequests] = useState([]);
+  const [myOffers, setMyOffers] = useState({}); // requestId -> oferta mía
+  const [offerChecked, setOfferChecked] = useState({}); // requestId -> true cuando ya se consultó
+  const [orders, setOrders] = useState([]);
+  const [reviews, setReviews] = useState(null);
+  const [error, setError] = useState('');
+  const [toggling, setToggling] = useState(false);
+  const [dismissed, setDismissed] = useState({}); // "Ahora no" (solo en esta sesión)
+  const [justSent, setJustSent] = useState(null); // tarjeta "Oferta enviada"
+  const [celebrated, setCelebrated] = useState(null); // ids de "Te eligieron" ya mostrados
+  const [onlineSince, setOnlineSince] = useState(null);
+  const now = useNow(1000);
+  const focused = useIsFocused();
+  const approved = provider?.status === 'approved';
+  const available = !!provider?.isAvailable;
+  const checked = useRef(new Set());
+  const lastIncoming = useRef('');
+  const celebrateKey = user ? `bubu:celebrated:${user.uid}` : '';
 
+  // Pedidos de mi zona (abiertos y pasados).
+  useEffect(() => {
+    if (!approved) return undefined;
+    return subscribeZoneRequests(provider, setRequests, (e) => setError(friendlyError(e)));
+  }, [approved, provider?.categoryIds?.join(), provider?.zoneIds?.join()]);
+
+  // Mis pedidos como proveedor (en curso, entregados hoy) y mis calificaciones.
+  useEffect(() => (approved && user ? subscribeMyOrders(user.uid, 'provider', setOrders, () => {}) : undefined), [approved, user]);
+  useEffect(() => (approved && user ? subscribeMyProviderReviews(user.uid, setReviews, () => setReviews(null)) : undefined), [approved, user]);
+
+  // Mis ofertas: se consulta una vez por pedido reciente.
+  useEffect(() => {
+    if (!user) return;
+    const limit = Date.now() - MISSED_WINDOW_DAYS * 86400000;
+    requests.filter((r) => toMillis(r.createdAt) > limit && !checked.current.has(r.id)).forEach((r) => {
+      checked.current.add(r.id);
+      getMyOffer(r.id, user.uid)
+        .then((o) => { if (o) setMyOffers((m) => ({ ...m, [r.id]: o })); })
+        .catch(() => {})
+        .finally(() => setOfferChecked((c) => ({ ...c, [r.id]: true })));
+    });
+  }, [requests, user]);
+
+  // Señal de "sigo conectado" + pantalla encendida mientras esté conectado.
+  useEffect(() => {
+    if (!approved || !available || !user) return undefined;
+    setOnlineSince((t) => t || Date.now());
+    keepScreenOn(true);
+    heartbeat(user.uid).catch(() => {});
+    const t = setInterval(() => heartbeat(user.uid).catch(() => {}), HEARTBEAT_MS);
+    return () => { clearInterval(t); keepScreenOn(false); };
+  }, [approved, available, user]);
+  useEffect(() => { if (!available) setOnlineSince(null); }, [available]);
+
+  // "Te eligieron" ya mostrados (se guardan en el teléfono para no repetirlos).
+  useEffect(() => {
+    if (!celebrateKey) return;
+    AsyncStorage.getItem(celebrateKey)
+      .then((v) => setCelebrated(new Set(JSON.parse(v || '[]'))))
+      .catch(() => setCelebrated(new Set()));
+  }, [celebrateKey]);
+
+  const groups = useMemo(() => {
+    const weekAgo = now - MISSED_WINDOW_DAYS * 86400000;
+    const mine = (r) => r.customerId === user?.uid;
+    const open = requests.filter((r) => !mine(r) && requestState(r, now) === 'open');
+    const won = requests.filter((r) => r.status === 'assigned' && r.chosenProviderId === user?.uid);
+    const recent = requests.filter((r) => !mine(r) && toMillis(r.createdAt) > weekAgo);
+    const takenByOthers = recent.filter((r) => r.status === 'assigned' && r.chosenProviderId !== user?.uid);
+    const expiredNoChoice = recent.filter((r) => requestState(r, now) === 'expired');
+    const missed = [...takenByOthers, ...expiredNoChoice].filter((r) => !myOffers[r.id]);
+    const lostWithOffer = takenByOthers.filter((r) => myOffers[r.id]);
+    return { open, won, missed, takenByOthers: takenByOthers.filter((r) => !myOffers[r.id]), expiredNoChoice: expiredNoChoice.filter((r) => !myOffers[r.id]), lostWithOffer };
+  }, [requests, now, user, myOffers]);
+
+  const canServe = (r) => (provider?.fulfillmentModes || []).includes(r.fulfillmentMode);
+
+  // Pedido que "sube" en pantalla: abierto, que puedo atender, sin oferta mía y no descartado.
+  // La vibración avisa aunque estés en otra pantalla; la tarjeta se muestra al estar en Inicio.
+  const incomingAny = available && approved
+    ? groups.open.find((r) => canServe(r) && offerChecked[r.id] && !myOffers[r.id] && !dismissed[r.id])
+    : null;
+  const incoming = focused && !modeOpen ? incomingAny : null;
+  useEffect(() => {
+    if (incomingAny && incomingAny.id !== lastIncoming.current) vibrate([0, 400, 200, 400]);
+    lastIncoming.current = incomingAny ? incomingAny.id : '';
+  }, [incomingAny?.id]);
+
+  // "¡Te eligieron!" que todavía no se ha mostrado.
+  // Solo pedidos asignados en las últimas 24 h (para no festejar pedidos viejos).
+  const chosenAny = approved && celebrated
+    ? groups.won.find((r) => !celebrated.has(r.id) && toMillis(r.updatedAt) > now - 86400000)
+    : null;
+  const chosen = focused && !modeOpen ? chosenAny : null;
+  useEffect(() => { if (chosenAny) vibrate([0, 200, 100, 200, 100, 500]); }, [chosenAny?.id]);
+  function closeChosen(goToOrder) {
+    const r = chosen;
+    const next = new Set(celebrated);
+    next.add(r.id);
+    setCelebrated(next);
+    AsyncStorage.setItem(celebrateKey, JSON.stringify([...next].slice(-200))).catch(() => {});
+    if (goToOrder && r.orderId) navigation.navigate('OrderDetail', { id: r.orderId });
+  }
+
+  const activeOrders = orders.filter((o) => ACTIVE_ORDER.includes(o.status));
+  const toAccept = orders.filter((o) => o.status === 'requested');
+  const startOfDay = new Date(now).setHours(0, 0, 0, 0);
+  const deliveredToday = orders.filter((o) => o.status === 'delivered' && toMillis(o.statusChangedAt || o.updatedAt) >= startOfDay).length;
+  const rating = ratingSummary(reviews);
+  const zoneLabel = (provider?.zoneIds || []).map((id) => zoneById(id)?.name || id).join(', ') || 'tu zona';
+
+  async function toggle(v) {
+    setToggling(true);
+    setError('');
+    try { await setAvailability(user.uid, v); if (v) vibrate(80); } catch (e) { setError(friendlyError(e)); } finally { setToggling(false); }
+  }
+
+  // "Acepto": un toque, en el horario que pidió el cliente.
+  async function quickAccept(r) {
+    setAccepting(r.id);
+    setError('');
+    try {
+      await acceptRequest(r, user.uid, provider, profile);
+      const o = await getMyOffer(r.id, user.uid);
+      if (o) setMyOffers((m) => ({ ...m, [r.id]: o }));
+      setJustSent(r);
+      setTimeout(() => setJustSent((cur) => (cur && cur.id === r.id ? null : cur)), 2600);
+    } catch (e) {
+      setError(friendlyError(e));
+    } finally {
+      setAccepting('');
+    }
+  }
+
+  function openRequestFooter(r) {
+    const offered = myOffers[r.id];
+    if (!canServe(r)) return <Text style={styles.muted}>No ofreces esta modalidad.</Text>;
+    if (offered) return <Badge tone="success">{offered.kind === 'accept' ? '✓ Aceptaste — el cliente decide' : `✓ Ya ofertaste${typeof offered.priceFrom === 'number' ? ` $${offered.priceFrom}` : ''} — toca para editar`}</Badge>;
+    if (!available) return null;
+    return (
+      <View>
+        <Button title={`👍 Acepto · ${r.whenText || 'su horario'}`} onPress={() => quickAccept(r)} loading={accepting === r.id} disabled={!!accepting} />
+        <Button title="Proponer precio u horario" variant="outline" onPress={() => navigation.navigate('MakeOffer', { requestId: r.id })} disabled={!!accepting} />
+      </View>
+    );
+  }
+
+  const ordersBar = activeOrders.length > 0 && (
+    <Pressable onPress={() => navigation.navigate('Pedidos')} style={({ pressed }) => [s.ordersBar, pressed && { opacity: 0.9 }]}>
+      <Text style={s.ordersBarText}>
+        📦 {activeOrders.length} {activeOrders.length === 1 ? 'pedido en curso' : 'pedidos en curso'}
+        {toAccept.length > 0 ? ` · ${toAccept.length} por aceptar` : ''}
+      </Text>
+      <Text style={s.ordersBarText}>›</Text>
+    </Pressable>
+  );
+
+  const missedCard = approved && (groups.missed.length > 0 || groups.lostWithOffer.length > 0) && (
+    <Card style={{ marginTop: 22 }}>
+      <Text style={styles.section}>📉 Te perdiste esta semana</Text>
+      <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
+        <StatPill value={groups.takenByOthers.length} label="los tomó otra lavandería" />
+        <StatPill value={groups.expiredNoChoice.length} label="vencieron sin respuesta" />
+      </View>
+      {groups.lostWithOffer.length > 0 && <Text style={styles.muted}>Además, en {groups.lostWithOffer.length} ofertaste pero el cliente eligió otra opción.</Text>}
+      {groups.missed.slice(0, 3).map((r) => (
+        <Text key={r.id} style={styles.muted}>• {(r.services || []).join(', ') || 'Pedido'} en {r.colonia} · {timeAgo(r.createdAt, now)}</Text>
+      ))}
+      <Text style={[styles.text, { marginTop: 10 }]}>💡 Conéctate y responde rápido: los clientes eligen entre las primeras ofertas.</Text>
+    </Card>
+  );
+
+  // ───────────── CONECTADO: radar ─────────────
+  if (approved && available) {
+    const others = groups.open.filter((r) => !incoming || r.id !== incoming.id);
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.navy }} edges={['top']}>
+        <ScrollView style={{ backgroundColor: colors.navy }} contentContainerStyle={{ paddingBottom: 40 }}>
+          <View style={s.onTop}>
+            <Text style={s.onPill}>🟢 Conectado</Text>
+            <Pressable onPress={() => setModeOpen(true)} style={s.modeBtn}><Text style={s.modeText}>🧰 Modo proveedor ▾</Text></Pressable>
+          </View>
+          <View style={{ alignItems: 'center', marginTop: 10 }}>
+            <Radar size={250} />
+            <Text style={s.onTitle}>Buscando pedidos…</Text>
+            <Text style={s.onSub}>en {zoneLabel}</Text>
+            <Text style={s.onTime}>⏱ Conectado {onlineSince ? elapsed(now - onlineSince) : '0 min'} · la pantalla se mantiene encendida</Text>
+            {rating && <RatingBadge summary={rating} style={{ marginTop: 10 }} />}
+          </View>
+
+          <View style={styles.page}>
+            {ordersBar}
+            <Notice tone="error">{error}</Notice>
+            {groups.won.length > 0 && (
+              <Pressable onPress={() => navigation.navigate('OrderDetail', { id: groups.won[0].orderId })} style={s.wonBar}>
+                <Text style={s.wonText}>🎉 Te eligieron en {groups.won.length} {groups.won.length === 1 ? 'pedido' : 'pedidos'} · ver el último ›</Text>
+              </Pressable>
+            )}
+            {others.length > 0 && (
+              <>
+                <Text style={[styles.section, { color: colors.white, marginTop: 18 }]}>Pedidos abiertos cerca ({others.length})</Text>
+                {others.map((r) => (
+                  <RequestCard key={r.id} request={r} state="open" now={now} footer={openRequestFooter(r)}
+                    onPress={() => canServe(r) && navigation.navigate('MakeOffer', { requestId: r.id })} />
+                ))}
+              </>
+            )}
+            {groups.open.length === 0 && <Text style={s.onHint}>Cuando un cliente de tu zona publique un pedido, aparecerá aquí y tu teléfono vibrará. Mantén la app abierta.</Text>}
+            {missedCard}
+            <Button title="Desconectarme" variant="light" onPress={() => toggle(false)} loading={toggling} style={{ marginTop: 26 }} />
+            <Text style={[styles.disclaimer, { color: '#8fa9cc' }]}>Solo recibes avisos con la app abierta. {BRAND_NAME} no procesa pagos.</Text>
+          </View>
+        </ScrollView>
+
+        {/* Tarjeta de pedido entrante */}
+        <Modal visible={!!incoming && !justSent && !chosen} transparent animationType="slide" onRequestClose={() => incoming && setDismissed((d) => ({ ...d, [incoming.id]: true }))}>
+          <View style={s.sheetBg}>
+            {incoming && (
+              <View style={s.sheet}>
+                <View style={styles.row}>
+                  <Text style={s.newTag}>🔔 NUEVO PEDIDO</Text>
+                  <Text style={s.sheetTimer}>⏱ {countdown(incoming.expiresAt, now)}</Text>
+                </View>
+                <Text style={s.sheetTitle}>{requestSummary(incoming) || 'Pedido'}</Text>
+                <Text style={s.sheetLine}>📍 {incoming.colonia}</Text>
+                <Text style={s.sheetLine}>{FULFILLMENT_MODES[incoming.fulfillmentMode]?.icon} {FULFILLMENT_MODES[incoming.fulfillmentMode]?.label}</Text>
+                <Text style={s.sheetLine}>🗓 {incoming.whenText || 'Lo antes posible'}</Text>
+                <Text style={[styles.muted, { marginTop: 10 }]}>Los datos del cliente se comparten solo si te elige.</Text>
+                <Button title={`👍 Acepto · ${incoming.whenText || 'su horario'}`} onPress={() => quickAccept(incoming)} loading={accepting === incoming.id} disabled={!!accepting} style={{ minHeight: 56 }} />
+                <Button title="Proponer precio u horario" variant="soft" disabled={!!accepting}
+                  onPress={() => { setDismissed((d) => ({ ...d, [incoming.id]: true })); navigation.navigate('MakeOffer', { requestId: incoming.id }); }} />
+                <Button title="Ahora no" variant="outline" disabled={!!accepting} onPress={() => setDismissed((d) => ({ ...d, [incoming.id]: true }))} />
+              </View>
+            )}
+          </View>
+        </Modal>
+
+        {/* Confirmación breve después de aceptar */}
+        <Modal visible={!!justSent && !chosen} transparent animationType="fade" onRequestClose={() => setJustSent(null)}>
+          <Pressable style={s.centerBg} onPress={() => setJustSent(null)}>
+            <View style={s.sentBox}>
+              <Text style={{ fontSize: 46 }}>✅</Text>
+              <Text style={s.sentTitle}>Oferta enviada</Text>
+              <Text style={[styles.muted, { textAlign: 'center' }]}>El cliente está eligiendo… Si te elige, lo verás aquí.</Text>
+            </View>
+          </Pressable>
+        </Modal>
+
+        <ChosenModal chosen={chosen} onClose={closeChosen} />
+        <ModeSwitchModal visible={modeOpen} onClose={() => setModeOpen(false)} />
+      </SafeAreaView>
+    );
+  }
+
+  // ───────────── DESCONECTADO o sin aprobar ─────────────
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.blue }} edges={['top']}>
       <ScrollView style={{ backgroundColor: colors.bg }} contentContainerStyle={{ paddingBottom: 40 }}>
         <Hero
           eyebrow="MODO PROVEEDOR"
-          title="Ofrece tus servicios."
-          intro="Registra tu negocio o tu servicio desde casa."
+          title={approved ? 'Estás desconectado.' : 'Ofrece tus servicios.'}
+          intro={approved ? 'Conéctate para recibir pedidos de tu zona y mandar tus ofertas.' : 'Registra tu negocio o tu servicio desde casa.'}
           modeLabel="🧰 Modo proveedor"
           onModePress={() => setModeOpen(true)}
         />
         <View style={styles.page}>
-          {!provider ? (
-            <Card>
-              <Text style={styles.section}>Ofrece tus servicios en {BRAND_NAME}</Text>
-              <Text style={styles.muted}>
-                Envía tu solicitud. El equipo de {BRAND_NAME} la revisa y, cuando la apruebe, podrás publicar tus servicios y recibir pedidos.
+          {approved && (
+            <View style={{ alignItems: 'center', marginTop: 4 }}>
+              <Pressable onPress={() => toggle(true)} disabled={toggling} accessibilityRole="button" accessibilityLabel="Conectarme"
+                style={({ pressed }) => [s.goBtn, pressed && { transform: [{ scale: 0.96 }] }, toggling && { opacity: 0.6 }]}>
+                <Text style={s.goIcon}>⏻</Text>
+                <Text style={s.goText}>{toggling ? 'Conectando…' : 'Conectarme'}</Text>
+              </Pressable>
+              <Text style={[styles.muted, { textAlign: 'center' }]}>
+                {groups.open.length > 0
+                  ? `Hay ${groups.open.length} ${groups.open.length === 1 ? 'pedido abierto' : 'pedidos abiertos'} en tu zona ahora mismo.`
+                  : 'Al conectarte, los clientes te ven "conectado ahora" y te llegan los pedidos.'}
               </Text>
-              <Button title="Comenzar solicitud" onPress={() => navigation.navigate('ProviderApplication')} />
-            </Card>
-          ) : (
-            <Card>
-              <View style={styles.row}>
-                <Text style={[styles.section, { flex: 1 }]} numberOfLines={2}>{provider.businessName}</Text>
-                <Badge tone={st.tone}>{st.label}</Badge>
+            </View>
+          )}
+          <Notice tone="error">{error}</Notice>
+
+          {approved && (
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 18 }}>
+              <StatPill value={activeOrders.length} label="pedidos en curso" />
+              <StatPill value={deliveredToday} label="entregados hoy" tone={deliveredToday > 0 ? 'success' : 'info'} />
+              <View style={[s.ratingPill]}>
+                <Text style={s.ratingValue}>{rating ? `★ ${rating.avg.toFixed(1)}` : '—'}</Text>
+                <Text style={s.ratingLabel}>{rating ? `${rating.count} ${rating.count === 1 ? 'reseña' : 'reseñas'}` : 'sin reseñas'}</Text>
               </View>
-              <Notice tone={st.tone}>{st.text}</Notice>
-              {!!provider.reviewNote && <Notice tone="info">Nota del equipo: {provider.reviewNote}</Notice>}
-              <Text style={[styles.muted, { marginTop: 14 }]}>
-                Categorías: {(provider.categoryIds || []).map((id) => categoryById(id)?.name || id).join(', ') || '—'}
-              </Text>
-              <Text style={styles.muted}>
-                Zonas: {(provider.zoneIds || []).map((id) => zoneById(id)?.name || id).join(', ') || '—'}
-              </Text>
-              <Text style={styles.muted}>
-                Modalidad: {(provider.fulfillmentModes || []).map((m) => FULFILLMENT_MODES[m]?.providerLabel || m).join(' · ') || '—'}
-              </Text>
-              {provider.status !== 'suspended' && (
-                <Button title={provider.status === 'rejected' ? 'Corregir y reenviar' : 'Editar solicitud'} variant="outline" onPress={() => navigation.navigate('ProviderApplication')} />
-              )}
-            </Card>
+            </View>
           )}
-          {provider?.status === 'approved' && (
+          {approved && <View style={{ marginTop: 12 }}>{ordersBar}</View>}
+
+          {approved && groups.won.length > 0 && (
+            <>
+              <Text style={[styles.section, { marginTop: 22 }]}>🎉 ¡Te eligieron!</Text>
+              {groups.won.slice(0, 3).map((r) => (
+                <RequestCard key={r.id} request={r} state="assigned" now={now} onPress={() => navigation.navigate('OrderDetail', { id: r.orderId })}
+                  footer={<Text style={[styles.muted, { color: colors.blue, fontWeight: '800' }]}>Ver pedido y datos del cliente ›</Text>} />
+              ))}
+            </>
+          )}
+
+          {approved && groups.open.length > 0 && (
+            <>
+              <Text style={[styles.section, { marginTop: 22 }]}>Pedidos cerca de ti</Text>
+              <Notice tone="warn">Estás desconectado: conéctate para ofertar.</Notice>
+              {groups.open.map((r) => (
+                <RequestCard key={r.id} request={r} state="open" now={now} footer={openRequestFooter(r)} />
+              ))}
+            </>
+          )}
+
+          {approved && reviews && reviews.filter((r) => r.comment && !r.hidden).length > 0 && (
             <Card>
-              <Text style={styles.section}>Mis servicios</Text>
-              <Text style={styles.muted}>La publicación de servicios con precios de referencia y la recepción de pedidos se habilitan en la Etapa 5.</Text>
+              <Text style={styles.section}>Lo que dicen tus clientes</Text>
+              {reviews.filter((r) => r.comment && !r.hidden).slice(0, 3).map((r) => (
+                <Text key={r.id} style={[styles.muted, { marginTop: 8 }]}>{'★'.repeat(r.stars)} “{r.comment}” — {r.customerName || 'Cliente'}</Text>
+              ))}
             </Card>
           )}
-          <Text style={styles.disclaimer}>{BRAND_NAME} no procesa pagos todavía. Los precios que publiques serán solo de referencia.</Text>
+
+          {missedCard}
+          <ApplicationStatus provider={provider} navigation={navigation} />
+          <Text style={styles.disclaimer}>{BRAND_NAME} no procesa pagos. Tus precios son estimados y el pago se acuerda directo con el cliente.</Text>
         </View>
       </ScrollView>
+      <ChosenModal chosen={chosen} onClose={closeChosen} />
       <ModeSwitchModal visible={modeOpen} onClose={() => setModeOpen(false)} />
     </SafeAreaView>
   );
 }
+
+function ChosenModal({ chosen, onClose }) {
+  return (
+    <Modal visible={!!chosen} transparent animationType="fade" onRequestClose={() => onClose(false)}>
+      <View style={s.centerBg}>
+        {chosen && (
+          <View style={s.chosenBox}>
+            <Text style={{ fontSize: 64 }}>🎉</Text>
+            <Text style={s.chosenTitle}>¡Te eligieron!</Text>
+            <Text style={[styles.text, { textAlign: 'center', marginTop: 6 }]}>{requestSummary(chosen) || 'Pedido'}</Text>
+            <Text style={[styles.muted, { textAlign: 'center' }]}>📍 {chosen.colonia}{chosen.whenText ? ` · ${chosen.whenText}` : ''}</Text>
+            <Button title="Ver pedido y datos del cliente" onPress={() => onClose(true)} style={{ alignSelf: 'stretch' }} />
+            <Button title="Después" variant="soft" onPress={() => onClose(false)} style={{ alignSelf: 'stretch' }} />
+          </View>
+        )}
+      </View>
+    </Modal>
+  );
+}
+
+const s = StyleSheet.create({
+  // Desconectado
+  goBtn: { width: 170, height: 170, borderRadius: 85, backgroundColor: colors.blue, alignItems: 'center', justifyContent: 'center', marginTop: 8, marginBottom: 6,
+    borderWidth: 8, borderColor: '#cfe1ff', shadowColor: colors.blue, shadowOpacity: 0.45, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 10 },
+  goIcon: { fontSize: 42, color: colors.white, fontWeight: '900' },
+  goText: { fontSize: 18, color: colors.white, fontWeight: '900', marginTop: 4 },
+  ratingPill: { flex: 1, backgroundColor: '#fff6e5', borderRadius: 14, padding: 12 },
+  ratingValue: { fontSize: 22, fontWeight: '900', color: '#b26b00' },
+  ratingLabel: { fontSize: 12, color: colors.muted, marginTop: 2 },
+  ordersBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: colors.turquoise, borderRadius: 14, paddingVertical: 14, paddingHorizontal: 16, marginTop: 12 },
+  ordersBarText: { fontSize: 15, fontWeight: '900', color: colors.navy },
+  // Conectado
+  onTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 18, paddingTop: 12 },
+  onPill: { color: '#7dffb6', fontWeight: '900', fontSize: 15 },
+  modeBtn: { backgroundColor: '#ffffff1f', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7 },
+  modeText: { color: colors.white, fontWeight: '700', fontSize: 12 },
+  onTitle: { fontSize: 26, fontWeight: '900', color: colors.white, marginTop: 6 },
+  onSub: { fontSize: 15, color: '#cfe9ff', marginTop: 4 },
+  onTime: { fontSize: 12, color: '#8fa9cc', marginTop: 10, textAlign: 'center', paddingHorizontal: 20 },
+  onHint: { fontSize: 14, color: '#cfe9ff', textAlign: 'center', marginTop: 18, lineHeight: 20 },
+  wonBar: { backgroundColor: '#1fb36b', borderRadius: 14, padding: 14, marginTop: 12 },
+  wonText: { color: colors.white, fontWeight: '900', fontSize: 14 },
+  // Tarjeta entrante
+  sheetBg: { flex: 1, justifyContent: 'flex-end', backgroundColor: '#06142a99' },
+  sheet: { backgroundColor: colors.white, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 22, paddingBottom: 34 },
+  newTag: { fontSize: 13, fontWeight: '900', color: colors.blue, letterSpacing: 1 },
+  sheetTimer: { fontSize: 15, fontWeight: '900', color: colors.blue },
+  sheetTitle: { fontSize: 24, fontWeight: '900', color: colors.ink, marginTop: 12 },
+  sheetLine: { fontSize: 16, color: colors.ink, marginTop: 8 },
+  // Ventanas centradas
+  centerBg: { flex: 1, backgroundColor: '#06142ab0', alignItems: 'center', justifyContent: 'center', padding: 22 },
+  sentBox: { backgroundColor: colors.white, borderRadius: 24, padding: 26, alignItems: 'center', width: '100%', maxWidth: 400 },
+  sentTitle: { fontSize: 22, fontWeight: '900', color: colors.ink, marginTop: 6 },
+  chosenBox: { backgroundColor: colors.white, borderRadius: 28, padding: 26, alignItems: 'center', width: '100%', maxWidth: 420, borderWidth: 4, borderColor: '#1fb36b' },
+  chosenTitle: { fontSize: 30, fontWeight: '900', color: '#127a4a', marginTop: 4 },
+});

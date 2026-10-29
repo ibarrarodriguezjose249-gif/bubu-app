@@ -6,6 +6,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useCatalog } from '../../context/CatalogContext';
 import { submitProviderApplication, updateProviderApplication } from '../../services/providers';
 import { FULFILLMENT_MODES } from '../../constants/catalog';
+import { PROVIDER_TYPES } from '../../constants/requests';
 import { friendlyError } from '../../lib/errors';
 import { LIMITS, validateName } from '../../lib/validation';
 
@@ -22,6 +23,7 @@ export default function ProviderApplicationScreen({ navigation }) {
     categoryIds: provider?.categoryIds || [],
     zoneIds: provider?.zoneIds || [],
     fulfillmentModes: provider?.fulfillmentModes || ['dropoff'],
+    providerType: provider?.providerType || 'home',
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -59,6 +61,13 @@ export default function ProviderApplicationScreen({ navigation }) {
         placeholder="Qué haces, horarios, tiempos de entrega…"
         hint={`${form.description.length}/${LIMITS.description}`}
       />
+
+      <Text style={[styles.label, { marginTop: 18 }]}>¿Cómo trabajas?</Text>
+      <View style={styles.wrap}>
+        {Object.entries(PROVIDER_TYPES).map(([key, t]) => (
+          <Chip key={key} label={t.badge.split(' ')[0] + ' ' + t.label} selected={form.providerType === key} onPress={() => setForm({ ...form, providerType: key })} />
+        ))}
+      </View>
 
       <Text style={[styles.label, { marginTop: 18 }]}>Categorías</Text>
       {loading && <Text style={styles.muted}>Cargando…</Text>}
