@@ -1,4 +1,10 @@
-# Publica una actualización automática (sin reinstalar el APK).
+# Publica una actualización automática (sin reinstalar el APK) para las DOS apps:
+# BÜBÜ (canal preview) y BÜBÜ Socios (canal socios).
+# GitHub → Actions → "Publicar actualización" → Run workflow → escribe qué cambió.
+# Los teléfonos con el APK la descargan al abrir la app y la aplican la siguiente vez que se abre.
+# Requiere el secreto EXPO_TOKEN (GitHub → Settings → Secrets and variables → Actions).
+# Solo sirve para cambios de código (pantallas, textos, funciones). Si se agrega una pieza
+# nativa nueva, hay que construir otro APK con "APK de Android".
 name: Publicar actualización
 
 on:
@@ -26,7 +32,13 @@ jobs:
           npm install --no-audit --no-fund
           npx expo install expo-updates
           npx expo install --fix
-      - name: Publicar
+      - name: Publicar en BÜBÜ (clientes)
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          APP_VARIANT: clientes
         run: npx eas-cli@latest update --channel preview --platform android --message "${{ inputs.mensaje }}" --non-interactive
+      - name: Publicar en BÜBÜ Socios
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          APP_VARIANT: socios
+        run: npx eas-cli@latest update --channel socios --platform android --message "${{ inputs.mensaje }}" --non-interactive
