@@ -25,7 +25,7 @@ bubi_proyecto/
 │       ├── navigation/  Navegación entre pantallas
 │       └── screens/     Pantallas (auth, client, provider, admin, common)
 ├── firebase/            Reglas de seguridad de Firestore + pruebas con emulador
-├── admin/               (Etapa 6) Panel administrativo web — todavía no creado
+├── admin/               (Etapa 6) Panel administrativo web estático para Cloudflare Pages (ver admin/LEEME.md)
 ├── docs/
 │   ├── ETAPAS.md                Avance por etapas, archivos y pruebas
 │   ├── CONFIGURAR_FIREBASE.md   Pasos que debes hacer en la consola de Firebase

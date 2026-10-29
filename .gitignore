@@ -1,0 +1,26 @@
+node_modules/
+.expo/
+dist/
+web-build/
+*.log
+.DS_Store
+
+# Variables locales (aunque la config de Firebase es pública, no se sube por orden)
+.env
+.env.local
+mobile/.env
+admin/.env
+
+# Nunca subir credenciales de servidor
+serviceAccount*.json
+*-firebase-adminsdk-*.json
+*.p8
+*.p12
+*.jks
+*.keystore
+google-services.json
+GoogleService-Info.plist
+
+# Emuladores de Firebase
+firebase/*-debug.log
+firebase/.firebase/
