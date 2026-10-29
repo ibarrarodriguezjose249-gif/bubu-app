@@ -12,7 +12,7 @@ on:
 jobs:
   apk:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: mobile
@@ -41,7 +41,7 @@ jobs:
         working-directory: mobile/android
         env:
           GRADLE_OPTS: -Xmx4g -Dorg.gradle.daemon=false
-        run: ./gradlew assembleRelease --no-daemon
+        run: ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a
 
       - name: Renombrar
         run: cp android/app/build/outputs/apk/release/app-release.apk ../BUBU-android.apk
