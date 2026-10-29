@@ -15,7 +15,7 @@
       "buildNumber": "1"
     },
     "android": {
-      "package": "mx.bubu.app",
+      "package": "com.joseibarra.bubu",
       "versionCode": 1,
       "adaptiveIcon": {
         "backgroundColor": "#1769ff"
