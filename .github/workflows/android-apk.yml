@@ -37,6 +37,15 @@ jobs:
       - name: Generar proyecto Android
         run: npx expo prebuild --platform android --no-install --clean
 
+      - name: Más memoria para Gradle
+        run: |
+          if grep -q '^org.gradle.jvmargs=' android/gradle.properties; then
+            sed -i 's/^org.gradle.jvmargs=.*/org.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=2g/' android/gradle.properties
+          else
+            echo 'org.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=2g' >> android/gradle.properties
+          fi
+          grep '^org.gradle.jvmargs=' android/gradle.properties
+
       - name: Compilar APK
         working-directory: mobile/android
         env:
