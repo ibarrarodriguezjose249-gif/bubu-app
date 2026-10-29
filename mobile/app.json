@@ -11,7 +11,7 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "mx.bubu.app",
+      "bundleIdentifier": "com.joseibarra.bubu",
       "buildNumber": "1"
     },
     "android": {
