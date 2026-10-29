@@ -168,7 +168,8 @@ export default function ProviderHomeScreen({ navigation }) {
   // "¡Te eligieron!" que todavía no se ha mostrado.
   // Solo pedidos asignados en las últimas 24 h (para no festejar pedidos viejos).
   const chosenAny = approved && celebrated
-    ? groups.won.find((r) => !celebrated.has(r.id) && toMillis(r.updatedAt) > now - 86400000)
+    ? groups.won.find((r) => !celebrated.has(r.id) && toMillis(r.updatedAt) > now - 86400000
+      && orders.some((o) => o.id === r.orderId && ACTIVE_ORDER.includes(o.status)))
     : null;
   const chosen = focused && !modeOpen ? chosenAny : null;
   useEffect(() => { if (chosenAny) vibrate([0, 200, 100, 200, 100, 500]); }, [chosenAny?.id]);
