@@ -8,11 +8,19 @@ name: APK de Android
 
 on:
   workflow_dispatch:
+    inputs:
+      variante:
+        description: '¿Cuál app? clientes = BÜBÜ · socios = BÜBÜ Socios · completa = ambos modos (pruebas)'
+        type: choice
+        options: [clientes, socios, completa]
+        default: clientes
 
 jobs:
   apk:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      APP_VARIANT: ${{ inputs.variante }}
     defaults:
       run:
         working-directory: mobile
@@ -53,10 +61,10 @@ jobs:
         run: ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a
 
       - name: Renombrar
-        run: cp android/app/build/outputs/apk/release/app-release.apk ../BUBU-android.apk
+        run: cp android/app/build/outputs/apk/release/app-release.apk ../BUBU-${{ inputs.variante }}.apk
 
       - uses: actions/upload-artifact@v4
         with:
-          name: BUBU-android-apk
-          path: BUBU-android.apk
+          name: BUBU-${{ inputs.variante }}-apk
+          path: BUBU-${{ inputs.variante }}.apk
           retention-days: 30
