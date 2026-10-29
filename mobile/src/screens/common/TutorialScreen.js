@@ -11,6 +11,7 @@ import Icon from '../../components/Icon';
 import { useAuth } from '../../context/AuthContext';
 import { markTutorialSeen } from '../../lib/tutorial';
 import { BRAND_NAME, colors, fonts } from '../../constants/brand';
+import { IS_SOCIOS, SOCIOS_APP_NAME } from '../../constants/variant';
 
 const CLIENT_STEPS = [
   { icon: 'search', title: 'Encuentra un servicio', text: 'En Inicio elige la categoría que necesitas. Hoy está disponible Lavandería; las demás aparecen como "Pronto".' },
@@ -66,12 +67,12 @@ export default function TutorialScreen({ route, navigation, mode: modeProp, onFi
         <ScrollView contentContainerStyle={s.page}>
           <View style={s.center}>
             <View style={s.bigCircle}><Icon name={mode === 'provider' ? 'briefcase-outline' : 'heart-outline'} size={64} color={colors.blue} /></View>
-            <Text style={s.hello}>{mode === 'provider' ? 'Bienvenido al modo proveedor' : `¡Bienvenido a ${BRAND_NAME}! 💙`}</Text>
+            <Text style={s.hello}>{IS_SOCIOS ? `¡Bienvenido a ${SOCIOS_APP_NAME}! 💙` : mode === 'provider' ? 'Bienvenido al modo proveedor' : `¡Bienvenido a ${BRAND_NAME}! 💙`}</Text>
             <Text style={s.ask}>¿Cómo quieres comenzar?</Text>
           </View>
           <View>
             <Button title="Enseñarme cómo funciona" icon="school-outline" onPress={() => setI(0)} />
-            <Button title={`Ya conozco ${BRAND_NAME}, omitir tutorial`} variant="outline" onPress={finish} />
+            <Button title={`Ya conozco ${IS_SOCIOS ? SOCIOS_APP_NAME : BRAND_NAME}, omitir tutorial`} variant="outline" onPress={finish} />
           </View>
         </ScrollView>
       </SafeAreaView>
@@ -89,7 +90,7 @@ export default function TutorialScreen({ route, navigation, mode: modeProp, onFi
             <Text style={s.ask}>{mode === 'provider' ? 'Ya sabes cómo funciona el modo proveedor.' : `Ya sabes cómo usar ${BRAND_NAME}. Tu comunidad, tus servicios.`}</Text>
           </View>
           <View>
-            <Button title={`Comenzar a usar ${BRAND_NAME}`} onPress={finish} />
+            <Button title={`Comenzar a usar ${IS_SOCIOS ? SOCIOS_APP_NAME : BRAND_NAME}`} onPress={finish} />
             <Button title="Anterior" variant="ghost" onPress={() => setI(i - 1)} />
           </View>
         </ScrollView>

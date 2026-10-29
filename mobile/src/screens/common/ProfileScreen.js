@@ -8,6 +8,7 @@ import { PROVIDER_STATUS } from '../../services/providers';
 import { friendlyError } from '../../lib/errors';
 import ModeSwitchModal from '../../components/ModeSwitchModal';
 import { colors, fonts } from '../../constants/brand';
+import { CAN_SWITCH_MODE, IS_SOCIOS, SOCIOS_APP_NAME } from '../../constants/variant';
 
 function MenuItem({ icon, title, subtitle, onPress, last }) {
   return (
@@ -53,7 +54,7 @@ export default function ProfileScreen({ navigation }) {
           <View style={s.infoRow}><Icon name="location-outline" size={16} color={colors.muted} /><Text style={s.infoText}>{profile?.colonia || 'Colonia sin capturar'}</Text></View>
         </View>
         <View style={[styles.wrap, { marginTop: 12, gap: 6 }]}>
-          <Badge tone="info" icon={mode === 'provider' ? 'briefcase-outline' : 'person-outline'}>{mode === 'provider' ? 'Modo proveedor' : 'Modo cliente'}</Badge>
+          <Badge tone="info" icon={mode === 'provider' ? 'briefcase-outline' : 'person-outline'}>{IS_SOCIOS ? SOCIOS_APP_NAME : mode === 'provider' ? 'Modo proveedor' : 'Modo cliente'}</Badge>
           {provider && <Badge tone={PROVIDER_STATUS[provider.status]?.tone || 'warn'}>Proveedor: {PROVIDER_STATUS[provider.status]?.label || provider.status}</Badge>}
           {isAdmin && <Badge tone="success" icon="shield-checkmark-outline">Administrador</Badge>}
           {user && !user.emailVerified && <Badge tone="warn" icon="mail-unread-outline">Correo sin verificar</Badge>}
@@ -64,7 +65,9 @@ export default function ProfileScreen({ navigation }) {
 
       <Card style={{ paddingVertical: 4 }}>
         <MenuItem icon="create-outline" title="Editar datos" subtitle="Nombre, teléfono y colonia" onPress={() => navigation.navigate('EditProfile')} />
-        <MenuItem icon="swap-horizontal-outline" title="Cambiar de modo" subtitle={mode === 'provider' ? 'Ahora: ofrecer servicios' : 'Ahora: contratar servicios'} onPress={() => setModeOpen(true)} />
+        {CAN_SWITCH_MODE
+          ? <MenuItem icon="swap-horizontal-outline" title="Cambiar de modo" subtitle={mode === 'provider' ? 'Ahora: ofrecer servicios' : 'Ahora: contratar servicios'} onPress={() => setModeOpen(true)} />
+          : <MenuItem icon={IS_SOCIOS ? 'bag-handle-outline' : 'briefcase-outline'} title={IS_SOCIOS ? '¿Quieres pedir un servicio?' : '¿Ofreces servicios?'} subtitle={IS_SOCIOS ? 'Usa la app BÜBÜ con esta misma cuenta' : `Usa la app ${SOCIOS_APP_NAME} con esta misma cuenta`} onPress={() => setModeOpen(true)} />}
         <MenuItem icon="help-circle-outline" title="Ayuda: ver tutorial" subtitle={mode === 'provider' ? 'Cómo funciona el modo proveedor' : 'Cómo pedir un servicio'} onPress={() => navigation.navigate('Tutorial', { mode, manual: true })} last={!isAdmin} />
         {isAdmin && <MenuItem icon="shield-checkmark-outline" title="Herramientas de administrador" subtitle="La gestión completa está en el panel web" onPress={() => navigation.navigate('AdminTools')} last />}
       </Card>

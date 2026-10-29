@@ -13,6 +13,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import Hero from '../../components/Hero';
 import Radar from '../../components/Radar';
 import ModeSwitchModal from '../../components/ModeSwitchModal';
+import { CAN_SWITCH_MODE, IS_SOCIOS } from '../../constants/variant';
 import { Badge, Button, Card, Notice, styles } from '../../components/ui';
 import { RequestCard, StatPill } from '../../components/cards';
 import { RatingBadge } from '../../components/Rating';
@@ -259,7 +260,7 @@ export default function ProviderHomeScreen({ navigation }) {
         <ScrollView style={{ backgroundColor: colors.navy }} contentContainerStyle={{ paddingBottom: 40 }}>
           <View style={s.onTop}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}><View style={s.onDot} /><Text style={s.onPill}>Conectado</Text></View>
-            <Pressable onPress={() => setModeOpen(true)} style={s.modeBtn}><Icon name="briefcase-outline" size={13} color={colors.white} /><Text style={s.modeText}>Proveedor</Text><Icon name="chevron-down" size={13} color={colors.white} /></Pressable>
+            {CAN_SWITCH_MODE ? <Pressable onPress={() => setModeOpen(true)} style={s.modeBtn}><Icon name="briefcase-outline" size={13} color={colors.white} /><Text style={s.modeText}>Proveedor</Text><Icon name="chevron-down" size={13} color={colors.white} /></Pressable> : <Text style={s.modeText}>{IS_SOCIOS ? 'BÜBÜ Socios' : ''}</Text>}
           </View>
           <View style={{ alignItems: 'center', marginTop: 10 }}>
             <Radar size={250} />
@@ -338,7 +339,7 @@ export default function ProviderHomeScreen({ navigation }) {
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.blue }} edges={['top']}>
       <ScrollView style={{ backgroundColor: colors.bg }} contentContainerStyle={{ paddingBottom: 40 }}>
         <Hero
-          eyebrow="MODO PROVEEDOR"
+          eyebrow={IS_SOCIOS ? 'BÜBÜ SOCIOS' : 'MODO PROVEEDOR'}
           title={approved ? 'Estás desconectado.' : 'Ofrece tus servicios.'}
           intro={approved ? 'Conéctate para recibir pedidos de tu zona y mandar tus ofertas.' : 'Registra tu negocio o tu servicio desde casa.'}
           modeLabel="Proveedor"

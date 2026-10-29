@@ -3,14 +3,19 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { BRAND_NAME, LAUNCH_ZONE_LABEL, colors, fonts } from '../constants/brand';
 import Icon from './Icon';
+import { CAN_SWITCH_MODE } from '../constants/variant';
+import SociosTag from './SociosTag';
 
 export default function Hero({ title, intro, eyebrow, search, onSearch, modeLabel, modeIcon = 'swap-horizontal', onModePress, zoneLabel = LAUNCH_ZONE_LABEL }) {
   return (
     <View style={s.hero}>
       <View style={s.inner}>
         <View style={s.nav}>
-          <Text style={s.logo} accessibilityRole="header">{BRAND_NAME}</Text>
-          {!!modeLabel && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Text style={s.logo} accessibilityRole="header">{BRAND_NAME}</Text>
+            <SociosTag light />
+          </View>
+          {!!modeLabel && CAN_SWITCH_MODE && (
             <Pressable onPress={onModePress} style={s.pill} accessibilityRole="button" accessibilityLabel="Cambiar de modo">
               <Icon name={modeIcon} size={14} color={colors.white} />
               <Text style={s.pillText}>{modeLabel}</Text>

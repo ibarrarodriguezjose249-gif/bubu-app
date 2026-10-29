@@ -3,6 +3,7 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { BRAND_NAME, colors, fonts } from '../constants/brand';
 import Icon from './Icon';
+import SociosTag from './SociosTag';
 
 export default function AuthHeader({ subtitle, onBack }) {
   return (
@@ -13,6 +14,7 @@ export default function AuthHeader({ subtitle, onBack }) {
         </Pressable>
       )}
       <Text style={s.logo}>{BRAND_NAME}</Text>
+      <SociosTag light style={{ marginTop: 4 }} />
       {!!subtitle && <Text style={s.sub}>{subtitle}</Text>}
       <View style={s.curve} />
     </View>

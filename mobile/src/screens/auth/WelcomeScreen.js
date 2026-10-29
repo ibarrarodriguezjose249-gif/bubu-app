@@ -6,6 +6,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button } from '../../components/ui';
 import Icon from '../../components/Icon';
 import { BRAND_NAME, BRAND_SLOGAN, LAUNCH_ZONE_LABEL, colors, fonts } from '../../constants/brand';
+import { IS_SOCIOS } from '../../constants/variant';
+import SociosTag from '../../components/SociosTag';
 
 export default function WelcomeScreen({ navigation }) {
   return (
@@ -15,19 +17,20 @@ export default function WelcomeScreen({ navigation }) {
       <ScrollView contentContainerStyle={s.page}>
         <View style={s.top}>
           <Text style={s.logo} accessibilityRole="header">{BRAND_NAME}</Text>
-          <Text style={s.slogan}>{BRAND_SLOGAN}</Text>
+          <SociosTag style={{ marginBottom: 8 }} />
+          <Text style={s.slogan}>{IS_SOCIOS ? 'Recibe pedidos de tu comunidad' : BRAND_SLOGAN}</Text>
         </View>
 
         {/* Ilustración hecha con íconos: casa + ubicación + destellos */}
         <View style={s.art} accessible accessibilityLabel="Servicios locales en tu comunidad">
           <View style={s.artCircle}>
-            <Icon name="home-outline" size={92} color={colors.blue} />
+            <Icon name={IS_SOCIOS ? 'storefront-outline' : 'home-outline'} size={92} color={colors.blue} />
           </View>
           <View style={s.pin}><Icon name="location" size={30} color={colors.blue} /></View>
           <Icon name="sparkles" size={22} color={colors.turquoise} style={s.sparkL} />
           <Icon name="sparkles" size={18} color={colors.turquoise} style={s.sparkR} />
         </View>
-        <Text style={s.zone}>Comenzamos con lavanderías en {LAUNCH_ZONE_LABEL}</Text>
+        <Text style={s.zone}>{IS_SOCIOS ? `Para lavanderías y personas que lavan desde casa en ${LAUNCH_ZONE_LABEL}` : `Comenzamos con lavanderías en ${LAUNCH_ZONE_LABEL}`}</Text>
 
         <View style={s.actions}>
           <Button title="Iniciar sesión" onPress={() => navigation.navigate('Login')} />
