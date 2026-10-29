@@ -179,6 +179,9 @@ export default function ProviderHomeScreen({ navigation }) {
   }
 
   const activeOrders = orders.filter((o) => ACTIVE_ORDER.includes(o.status));
+  // "Te eligieron" en pantalla: solo los que siguen en curso (los terminados están en Pedidos).
+  const activeOrderIds = new Set(activeOrders.map((o) => o.id));
+  const wonActive = groups.won.filter((r) => activeOrderIds.has(r.orderId));
   const toAccept = orders.filter((o) => o.status === 'requested');
   const startOfDay = new Date(now).setHours(0, 0, 0, 0);
   const deliveredToday = orders.filter((o) => o.status === 'delivered' && toMillis(o.statusChangedAt || o.updatedAt) >= startOfDay).length;
@@ -267,9 +270,9 @@ export default function ProviderHomeScreen({ navigation }) {
           <View style={styles.page}>
             {ordersBar}
             <Notice tone="error">{error}</Notice>
-            {groups.won.length > 0 && (
-              <Pressable onPress={() => navigation.navigate('OrderDetail', { id: groups.won[0].orderId })} style={s.wonBar}>
-                <Text style={s.wonText}>🎉 Te eligieron en {groups.won.length} {groups.won.length === 1 ? 'pedido' : 'pedidos'} · ver el último ›</Text>
+            {wonActive.length > 0 && (
+              <Pressable onPress={() => navigation.navigate('OrderDetail', { id: wonActive[0].orderId })} style={s.wonBar}>
+                <Text style={s.wonText}>🎉 Te eligieron en {wonActive.length} {wonActive.length === 1 ? 'pedido en curso' : 'pedidos en curso'} · ver el último ›</Text>
               </Pressable>
             )}
             {others.length > 0 && (
@@ -368,10 +371,10 @@ export default function ProviderHomeScreen({ navigation }) {
           )}
           {approved && <View style={{ marginTop: 12 }}>{ordersBar}</View>}
 
-          {approved && groups.won.length > 0 && (
+          {approved && wonActive.length > 0 && (
             <>
               <Text style={[styles.section, { marginTop: 22 }]}>🎉 ¡Te eligieron!</Text>
-              {groups.won.slice(0, 3).map((r) => (
+              {wonActive.slice(0, 3).map((r) => (
                 <RequestCard key={r.id} request={r} state="assigned" now={now} onPress={() => navigation.navigate('OrderDetail', { id: r.orderId })}
                   footer={<Text style={[styles.muted, { color: colors.blue, fontWeight: '800' }]}>Ver pedido y datos del cliente ›</Text>} />
               ))}
