@@ -1,1 +1,32 @@
+# Publica una actualización automática (sin reinstalar el APK).
+name: Publicar actualización
 
+on:
+  workflow_dispatch:
+    inputs:
+      mensaje:
+        description: '¿Qué cambió?'
+        required: true
+        default: 'Mejoras'
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Instalar dependencias
+        run: |
+          npm install --no-audit --no-fund
+          npx expo install expo-updates
+          npx expo install --fix
+      - name: Publicar
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: npx eas-cli@latest update --channel preview --platform android --message "${{ inputs.mensaje }}" --non-interactive
