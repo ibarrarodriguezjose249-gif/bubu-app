@@ -1,0 +1,52 @@
+# Construye el APK de Android de BÜBÜ en los servidores de GitHub (gratis).
+# No necesitas instalar nada: GitHub → pestaña "Actions" → "APK de Android" → "Run workflow".
+# Al terminar (~15-25 min), el APK queda en "Artifacts" del resultado, listo para descargar.
+#
+# Es un APK de PRUEBA para instalar directo en Android (no para Play Store):
+# va firmado con la llave de depuración que genera Android.
+name: APK de Android
+
+on:
+  workflow_dispatch:
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Instalar dependencias
+        run: |
+          npm install --no-audit --no-fund
+          npx expo install --fix
+
+      - name: Generar proyecto Android
+        run: npx expo prebuild --platform android --no-install --clean
+
+      - name: Compilar APK
+        working-directory: mobile/android
+        env:
+          GRADLE_OPTS: -Xmx4g -Dorg.gradle.daemon=false
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Renombrar
+        run: cp android/app/build/outputs/apk/release/app-release.apk ../BUBU-android.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BUBU-android-apk
+          path: BUBU-android.apk
+          retention-days: 30
