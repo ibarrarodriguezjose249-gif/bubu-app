@@ -36,7 +36,7 @@ names = {rel: flat(rel) for rel in files}
 assert len(set(names.values())) == len(names), 'nombres repetidos'
 
 imp = re.compile(r"""(from\s+|import\s+)(['"])(\.{1,2}/[^'"]+)\2""")
-fb = re.compile(r"""(['"])firebase/(app|auth|firestore)\1""")
+fb = re.compile(r"""(['"])firebase/(app|auth|firestore|functions|storage)\1""")
 
 if os.path.exists(OUT):
     for f in os.listdir(OUT):
@@ -56,10 +56,11 @@ for rel, p in files.items():
     open(os.path.join(OUT, names[rel]), 'w', encoding='utf-8').write(s)
 
 pkg = {"dependencies": {
-    "@firebase/app": "*", "@firebase/auth": "*", "@firebase/firestore": "*",
+    "@firebase/app": "*", "@firebase/auth": "*", "@firebase/firestore": "*", "@firebase/functions": "*", "@firebase/storage": "*",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-navigation/native": "^7.1.8", "@react-navigation/native-stack": "^7.3.16",
     "@react-navigation/bottom-tabs": "^7.4.0", "react-native-screens": "~4.16.0",
-    "react-native-safe-area-context": "~5.6.0", "expo-status-bar": "~3.0.9", "expo-keep-awake": "~15.0.7"}}
+    "react-native-safe-area-context": "~5.6.0", "expo-status-bar": "~3.0.9", "expo-keep-awake": "~15.0.8", "expo-notifications": "~0.32.17", "expo-image-picker": "~17.0.11", "react-native-webview": "13.15.0", "expo-location": "~19.0.8",
+    "expo-font": "~14.0.12", "@expo/vector-icons": "^15.0.3", "@expo-google-fonts/montserrat": "^0.4.2", "expo-constants": "~18.0.13"}}
 json.dump(pkg, open(os.path.join(OUT, 'package.json'), 'w'), indent=2)
 print(f'{len(names)} archivos generados en snack/')

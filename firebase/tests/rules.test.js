@@ -294,9 +294,11 @@ describe('Pedidos y reservas', () => {
   });
   it('proveedor sigue el flujo requested → accepted → in_progress → ready → delivered', async () => {
     const ref = doc(ctx(LUPE), 'orders', 'ord-1');
-    for (const s of ['accepted', 'in_progress', 'ready', 'delivered']) {
+    for (const s of ['accepted', 'in_progress', 'ready']) {
       await assertSucceeds(updateDoc(ref, { status: s, statusChangedAt: serverTimestamp(), updatedAt: serverTimestamp() }));
     }
+    // Al entregar se anota lo cobrado y el % vigente (30 % + 16 % IVA si el admin no lo ha fijado).
+    await assertSucceeds(updateDoc(ref, { status: 'delivered', finalPrice: 150, commissionPct: 30, commissionIvaPct: 16, serviceFee: 10, statusChangedAt: serverTimestamp(), updatedAt: serverTimestamp() }));
   });
   it('proveedor NO salta estados', async () => {
     await assertFails(updateDoc(doc(ctx(LUPE), 'orders', 'ord-1'), { status: 'delivered', statusChangedAt: serverTimestamp() }));
@@ -509,5 +511,356 @@ describe('Etapa 5: calificaciones', () => {
     await assertSucceeds(getDoc(doc(ctx(ANA), 'reviews', 'ord-r')));
     await assertSucceeds(getDocs(query(collection(ctx(LUPE), 'reviews'), where('providerId', '==', LUPE))));
     await assertFails(getDocs(collection(anon(), 'reviews')));
+  });
+});
+
+describe('Etapa 6: avisos al teléfono (pushTokens)', () => {
+  const tok = (extra = {}) => ({ token: 'ExponentPushToken[abcdefghijklmnop]', platform: 'android', app: 'socios', updatedAt: serverTimestamp(), ...extra });
+  it('cada quien guarda y borra solo su token', async () => {
+    await assertSucceeds(setDoc(doc(ctx(LUPE), 'pushTokens', LUPE), tok()));
+    await assertSucceeds(setDoc(doc(ctx(LUPE), 'pushTokens', LUPE), tok({ platform: 'ios' })));
+    await assertFails(setDoc(doc(ctx(ANA), 'pushTokens', LUPE), tok()));
+    await assertFails(deleteDoc(doc(ctx(ANA), 'pushTokens', LUPE)));
+    await assertSucceeds(deleteDoc(doc(ctx(LUPE), 'pushTokens', LUPE)));
+  });
+  it('nadie más lo lee ni lo lista (ni sin sesión)', async () => {
+    await setDoc(doc(ctx(LUPE), 'pushTokens', LUPE), tok());
+    await assertSucceeds(getDoc(doc(ctx(LUPE), 'pushTokens', LUPE)));
+    await assertFails(getDoc(doc(ctx(ANA), 'pushTokens', LUPE)));
+    await assertFails(getDocs(collection(ctx(ADMIN), 'pushTokens')));
+    await assertFails(getDoc(doc(anon(), 'pushTokens', LUPE)));
+  });
+  it('solo campos permitidos y token con formato de Expo', async () => {
+    await assertFails(setDoc(doc(ctx(LUPE), 'pushTokens', LUPE), tok({ token: 'cualquier-cosa-que-no-es-token' })));
+    await assertFails(setDoc(doc(ctx(LUPE), 'pushTokens', LUPE), tok({ platform: 'windows' })));
+    await assertFails(setDoc(doc(ctx(LUPE), 'pushTokens', LUPE), tok({ isAdmin: true })));
+    await assertFails(setDoc(doc(anon(), 'pushTokens', LUPE), tok()));
+  });
+});
+
+describe('Etapa 6: comisión por pedido', () => {
+  const toReady = async () => env.withSecurityRulesDisabled((c) => setDoc(doc(c.firestore(), 'orders', 'ord-c'), { ...newOrder(), status: 'ready' }));
+  const deliver = (uid, extra = {}) => updateDoc(doc(ctx(uid), 'orders', 'ord-c'), { status: 'delivered', finalPrice: 200, commissionPct: 30, commissionIvaPct: 16, serviceFee: 10, statusChangedAt: serverTimestamp(), updatedAt: serverTimestamp(), ...extra });
+  it('para entregar hay que anotar cuánto se cobró', async () => {
+    await toReady();
+    await assertFails(updateDoc(doc(ctx(LUPE), 'orders', 'ord-c'), { status: 'delivered', statusChangedAt: serverTimestamp() }));
+    await assertFails(deliver(LUPE, { finalPrice: 0 }));
+    await assertFails(deliver(LUPE, { finalPrice: -5 }));
+    await assertFails(deliver(LUPE, { finalPrice: 'mucho' }));
+    await assertSucceeds(deliver(LUPE));
+  });
+  it('el socio no elige su %: debe ser el vigente', async () => {
+    await toReady();
+    await assertFails(deliver(LUPE, { commissionPct: 0 }));
+    await assertFails(deliver(LUPE, { commissionIvaPct: 0 }));
+    await assertFails(deliver(LUPE, { serviceFee: 0 })); // en efectivo la cuota también se cobra
+    await env.withSecurityRulesDisabled((c) => setDoc(doc(c.firestore(), 'config', 'commission'), { pct: 12, ivaPct: 16, serviceFee: 10, debtLimit: 300 }));
+    await assertFails(deliver(LUPE, { commissionPct: 30 }));
+    await assertSucceeds(deliver(LUPE, { commissionPct: 12 }));
+  });
+  it('no se toca el total en otros pasos ni después de entregado', async () => {
+    await env.withSecurityRulesDisabled((c) => setDoc(doc(c.firestore(), 'orders', 'ord-c'), { ...newOrder(), status: 'accepted' }));
+    await assertFails(updateDoc(doc(ctx(LUPE), 'orders', 'ord-c'), { status: 'in_progress', finalPrice: 1, statusChangedAt: serverTimestamp() }));
+    await env.withSecurityRulesDisabled((c) => setDoc(doc(c.firestore(), 'orders', 'ord-c'), { ...newOrder(), status: 'delivered', finalPrice: 200, commissionPct: 30, commissionIvaPct: 16 }));
+    await assertFails(updateDoc(doc(ctx(LUPE), 'orders', 'ord-c'), { finalPrice: 20 }));
+    await assertFails(updateDoc(doc(ctx(ANA), 'orders', 'ord-c'), { finalPrice: 20 }));
+    await assertSucceeds(updateDoc(doc(ctx(ADMIN), 'orders', 'ord-c'), { finalPrice: 180, adminNote: 'Corrección' }));
+    await assertFails(updateDoc(doc(ctx(ADMIN), 'orders', 'ord-c'), { commissionPct: 50 }));
+  });
+  it('solo el admin fija comisión, IVA, cuota de servicio y límite de adeudo', async () => {
+    const cfg = (uid, extra = {}) => setDoc(doc(ctx(uid), 'config', 'commission'), { pct: 30, ivaPct: 16, serviceFee: 10, debtLimit: 300, updatedAt: serverTimestamp(), updatedBy: uid, ...extra });
+    await assertFails(cfg(LUPE));
+    await assertFails(cfg(ADMIN, { pct: 50 }));
+    await assertFails(cfg(ADMIN, { ivaPct: 20 }));
+    await assertFails(cfg(ADMIN, { serviceFee: 500 }));
+    await assertFails(cfg(ADMIN, { debtLimit: -1 }));
+    await assertSucceeds(cfg(ADMIN));
+    await assertSucceeds(getDoc(doc(ctx(LUPE), 'config', 'commission')));
+    await assertFails(getDoc(doc(anon(), 'config', 'commission')));
+    await assertFails(setDoc(doc(ctx(ADMIN), 'config', 'otra'), { pct: 5, updatedAt: serverTimestamp(), updatedBy: ADMIN }));
+  });
+  it('pagos de comisión: los registra el admin; el socio ve solo los suyos', async () => {
+    const pay = (uid, extra = {}) => setDoc(doc(ctx(uid), 'commissionPayments', 'p1'), { providerId: LUPE, amount: 300, method: 'Transferencia', createdAt: serverTimestamp(), createdBy: uid, ...extra });
+    await assertFails(pay(LUPE));
+    await assertFails(pay(ADMIN, { amount: 0 }));
+    await assertSucceeds(pay(ADMIN));
+    await assertFails(updateDoc(doc(ctx(ADMIN), 'commissionPayments', 'p1'), { amount: 1 }));
+    await assertSucceeds(getDocs(query(collection(ctx(LUPE), 'commissionPayments'), where('providerId', '==', LUPE))));
+    await assertFails(getDocs(query(collection(ctx(PEPE), 'commissionPayments'), where('providerId', '==', LUPE))));
+    await assertFails(deleteDoc(doc(ctx(LUPE), 'commissionPayments', 'p1')));
+    await assertSucceeds(deleteDoc(doc(ctx(ADMIN), 'commissionPayments', 'p1')));
+  });
+});
+
+describe('Etapa 6: total a pagar y pago con tarjeta', () => {
+  const put = (data) => env.withSecurityRulesDisabled((c) => setDoc(doc(c.firestore(), 'orders', 'ord-p'), { ...newOrder(), ...data }));
+  const upd = (uid, data) => updateDoc(doc(ctx(uid), 'orders', 'ord-p'), data);
+  it('el socio anota el total al recibir la ropa y lo corrige mientras no esté pagado', async () => {
+    await put({ status: 'accepted' });
+    await assertFails(upd(LUPE, { status: 'in_progress', amountDue: 0, statusChangedAt: serverTimestamp() }));
+    await assertFails(upd(LUPE, { status: 'in_progress', amountDue: 150, weightPhotoPath: 'evidence/otro/weight-1700000000.jpg', statusChangedAt: serverTimestamp() }));
+    await assertSucceeds(upd(LUPE, { status: 'in_progress', amountDue: 150, statusChangedAt: serverTimestamp() })); // servidor apagado: foto opcional
+    await assertSucceeds(upd(LUPE, { amountDue: 170, updatedAt: serverTimestamp() }));
+    await assertFails(upd(ANA, { amountDue: 1 }));
+    await put({ status: 'in_progress', amountDue: 150, paymentStatus: 'paid' });
+    await assertFails(upd(LUPE, { amountDue: 170 }));
+  });
+  it('el cliente elige tarjeta o efectivo, pero NUNCA se marca pagado desde la app', async () => {
+    await put({ status: 'in_progress', amountDue: 150 });
+    await assertSucceeds(upd(ANA, { paymentStatus: 'cash', updatedAt: serverTimestamp() }));
+    await assertSucceeds(upd(ANA, { paymentStatus: 'pending', updatedAt: serverTimestamp() }));
+    await assertFails(upd(ANA, { paymentStatus: 'paid' }));
+    await assertFails(upd(LUPE, { paymentStatus: 'paid' }));
+    await assertFails(upd(ANA, { paymentStatus: 'cash', paidAmount: 150 }));
+    await assertFails(upd(EVA, { paymentStatus: 'cash' }));
+  });
+  it('pagado con tarjeta: al entregar, el total debe ser lo pagado', async () => {
+    await put({ status: 'ready', amountDue: 150, paymentStatus: 'paid' });
+    const deliver = (fp, extra = {}) => upd(LUPE, { status: 'delivered', finalPrice: fp, commissionPct: 30, commissionIvaPct: 16, statusChangedAt: serverTimestamp(), ...extra });
+    await assertFails(deliver(100));
+    await assertFails(deliver(150, { serviceFee: 0 })); // la cuota de un pago con tarjeta la fija el servidor
+    await assertSucceeds(deliver(150));
+  });
+  it('pagos semanales a socios: solo admin; el socio ve los suyos', async () => {
+    const pay = (uid) => setDoc(doc(ctx(uid), 'payouts', 'po1'), { providerId: LUPE, amount: 900, method: 'Transferencia', period: 'Semana 26 oct – 1 nov', createdAt: serverTimestamp(), createdBy: uid });
+    await assertFails(pay(LUPE));
+    await assertSucceeds(pay(ADMIN));
+    await assertSucceeds(getDocs(query(collection(ctx(LUPE), 'payouts'), where('providerId', '==', LUPE))));
+    await assertFails(getDocs(query(collection(ctx(PEPE), 'payouts'), where('providerId', '==', LUPE))));
+    await assertFails(updateDoc(doc(ctx(ADMIN), 'payouts', 'po1'), { amount: 1 }));
+  });
+});
+
+describe('Etapa 6: saldo y bloqueo por adeudo (solo servidor)', () => {
+  it('nadie escribe saldos ni bloqueos desde la app; el socio ve los suyos', async () => {
+    await assertFails(setDoc(doc(ctx(LUPE), 'providerBalances', LUPE), { balance: 999 }));
+    await assertFails(setDoc(doc(ctx(ADMIN), 'debtBlocks', LUPE), { debt: 1 }));
+    await assertFails(deleteDoc(doc(ctx(LUPE), 'debtBlocks', LUPE)));
+    await env.withSecurityRulesDisabled((c) => setDoc(doc(c.firestore(), 'providerBalances', LUPE), { balance: -400 }));
+    await assertSucceeds(getDoc(doc(ctx(LUPE), 'providerBalances', LUPE)));
+    await assertFails(getDoc(doc(ctx(ANA), 'providerBalances', LUPE)));
+  });
+  it('socio bloqueado por adeudo: no oferta ni recibe reservas', async () => {
+    await env.withSecurityRulesDisabled((c) => setDoc(doc(c.firestore(), 'debtBlocks', LUPE), { debt: 400 }));
+    await assertFails(addDoc(collection(ctx(ANA), 'orders'), newOrder()));
+    await env.withSecurityRulesDisabled((c) => deleteDoc(doc(c.firestore(), 'debtBlocks', LUPE)));
+    await assertSucceeds(addDoc(collection(ctx(ANA), 'orders'), newOrder()));
+  });
+  it('bloqueado puede terminar los pedidos que ya tiene', async () => {
+    await env.withSecurityRulesDisabled(async (c) => {
+      await setDoc(doc(c.firestore(), 'orders', 'ord-b'), { ...newOrder(), status: 'in_progress', amountDue: 100 });
+      await setDoc(doc(c.firestore(), 'debtBlocks', LUPE), { debt: 400 });
+    });
+    await assertSucceeds(updateDoc(doc(ctx(LUPE), 'orders', 'ord-b'), { status: 'ready', statusChangedAt: serverTimestamp() }));
+  });
+});
+
+describe('Etapa 6: transferencia directa al socio', () => {
+  const ti = { holder: 'Lupe Pérez', bank: 'BBVA', account: '012345678901234567' };
+  const put = (data) => env.withSecurityRulesDisabled((c) => setDoc(doc(c.firestore(), 'orders', 'ord-t'), { ...newOrder(), ...data }));
+  const upd = (uid, data) => updateDoc(doc(ctx(uid), 'orders', 'ord-t'), data);
+  it('el socio guarda su cuenta; nadie más la lee', async () => {
+    await assertSucceeds(setDoc(doc(ctx(LUPE), 'providerPayInfo', LUPE), { ...ti, updatedAt: serverTimestamp() }));
+    await assertFails(setDoc(doc(ctx(LUPE), 'providerPayInfo', LUPE), { ...ti, account: '1', updatedAt: serverTimestamp() }));
+    await assertFails(setDoc(doc(ctx(ANA), 'providerPayInfo', LUPE), { ...ti, updatedAt: serverTimestamp() }));
+    await assertFails(getDoc(doc(ctx(ANA), 'providerPayInfo', LUPE)));
+    await assertSucceeds(getDoc(doc(ctx(ADMIN), 'providerPayInfo', LUPE)));
+  });
+  it('los datos de transferencia van en el pedido al recibir la ropa', async () => {
+    await put({ status: 'accepted' });
+    await assertFails(upd(LUPE, { status: 'in_progress', amountDue: 150, transferInfo: { holder: 'X', account: '1' }, statusChangedAt: serverTimestamp() }));
+    await assertSucceeds(upd(LUPE, { status: 'in_progress', amountDue: 150, transferInfo: ti, weightPhotoPath: 'evidence/ord-t/weight-1700000000.jpg', statusChangedAt: serverTimestamp() }));
+    await assertSucceeds(getDoc(doc(ctx(ANA), 'orders', 'ord-t')));
+  });
+  it('cliente elige transferencia; solo el socio confirma que le llegó', async () => {
+    await put({ status: 'in_progress', amountDue: 150, transferInfo: ti });
+    await assertSucceeds(upd(ANA, { paymentStatus: 'transfer', updatedAt: serverTimestamp() }));
+    await assertFails(upd(ANA, { paymentStatus: 'transfer_ok' }));
+    await assertFails(upd(EVA, { paymentStatus: 'transfer_ok' }));
+    await assertSucceeds(upd(LUPE, { paymentStatus: 'transfer_ok', updatedAt: serverTimestamp() }));
+    await assertFails(upd(ANA, { paymentStatus: 'cash' }));          // ya confirmada
+    await assertFails(upd(LUPE, { amountDue: 999 }));                 // ya no se cambia el total
+  });
+  it('tarjeta activable solo por el admin (cardEnabled booleano)', async () => {
+    const cfg = (uid, extra = {}) => setDoc(doc(ctx(uid), 'config', 'commission'), { pct: 15, ivaPct: 16, serviceFee: 10, debtLimit: 300, cardEnabled: false, updatedAt: serverTimestamp(), updatedBy: uid, ...extra });
+    await assertSucceeds(cfg(ADMIN));
+    await assertFails(cfg(ADMIN, { cardEnabled: 'si' }));
+    await assertFails(cfg(LUPE, { cardEnabled: true }));
+  });
+});
+
+describe('Etapa 6: protecciones de pago', () => {
+  const put = (data) => env.withSecurityRulesDisabled((c) => setDoc(doc(c.firestore(), 'orders', 'ord-x'), { ...newOrder(), ...data }));
+  const upd = (uid, data) => updateDoc(doc(ctx(uid), 'orders', 'ord-x'), data);
+  const deliverData = (extra = {}) => ({ status: 'delivered', finalPrice: 150, commissionPct: 30, commissionIvaPct: 16, serviceFee: 10, statusChangedAt: serverTimestamp(), ...extra });
+  it('el socio NO puede bajar el total al entregar', async () => {
+    await put({ status: 'ready', amountDue: 150, paymentStatus: 'cash' });
+    await assertFails(upd(LUPE, deliverData({ finalPrice: 90 })));
+    await assertSucceeds(upd(LUPE, deliverData({ deliveredBy: 'provider' })));
+  });
+  it('el cliente cierra con "Ya recibí mi ropa" (total = el que vio)', async () => {
+    await put({ status: 'in_progress', amountDue: 150, paymentStatus: 'cash' });
+    await assertFails(upd(ANA, deliverData({ finalPrice: 100, deliveredBy: 'customer' })));
+    await assertFails(upd(ANA, deliverData({ deliveredBy: 'provider' })));
+    await assertFails(upd(EVA, deliverData({ deliveredBy: 'customer' })));
+    await assertSucceeds(upd(ANA, deliverData({ deliveredBy: 'customer' })));
+  });
+  it('sin total anotado el cliente no puede cerrar', async () => {
+    await put({ status: 'in_progress' });
+    await assertFails(upd(ANA, deliverData({ deliveredBy: 'customer' })));
+  });
+  it('"Ya transferí": clave de rastreo y comprobante de ESTE pedido', async () => {
+    await put({ status: 'in_progress', amountDue: 150, paymentStatus: 'transfer' });
+    const rep = (extra = {}) => upd(ANA, { paymentStatus: 'transfer', transferRef: 'MBAN01002611010012345', receiptPath: 'receipts/ord-x/170000.jpg', transferReportedAt: serverTimestamp(), updatedAt: serverTimestamp(), ...extra });
+    await assertFails(rep({ receiptPath: 'receipts/otro-pedido/1.jpg' }));
+    await assertFails(rep({ transferRef: 'x'.repeat(60) }));
+    await assertFails(upd(LUPE, { transferRef: 'ABC', transferReportedAt: serverTimestamp() }));
+    await assertSucceeds(rep());
+  });
+  it('ya entregado: el cliente puede reportar su transferencia, no cambiar a efectivo', async () => {
+    await put({ status: 'delivered', amountDue: 150, finalPrice: 150, paymentStatus: 'transfer' });
+    await assertSucceeds(upd(ANA, { paymentStatus: 'transfer', transferRef: 'ABC123', transferReportedAt: serverTimestamp(), updatedAt: serverTimestamp() }));
+    await assertFails(upd(ANA, { paymentStatus: 'cash' }));
+  });
+});
+
+describe('Etapa 6: chat por pedido', () => {
+  const put = (data) => env.withSecurityRulesDisabled((c) => setDoc(doc(c.firestore(), 'orders', 'ord-m'), { ...newOrder(), ...data }));
+  const msg = (uid, role, extra = {}) => addDoc(collection(ctx(uid), 'orders', 'ord-m', 'messages'), { senderId: uid, senderRole: role, text: 'Hola', createdAt: serverTimestamp(), ...extra });
+  it('cliente y socio escriben y leen mientras el pedido está activo', async () => {
+    await put({ status: 'accepted' });
+    await assertSucceeds(msg(ANA, 'customer'));
+    await assertSucceeds(msg(LUPE, 'provider'));
+    await assertSucceeds(getDocs(collection(ctx(ANA), 'orders', 'ord-m', 'messages')));
+    await assertFails(msg(EVA, 'customer'));
+    await assertFails(getDocs(collection(ctx(EVA), 'orders', 'ord-m', 'messages')));
+    await assertFails(msg(ANA, 'provider'));           // no se hace pasar por el socio
+    await assertFails(msg(ANA, 'customer', { senderId: LUPE }));
+  });
+  it('pedido cerrado: ellos ya no ven el chat; el admin sí, y nadie borra', async () => {
+    await put({ status: 'accepted' });
+    await msg(ANA, 'customer');
+    await env.withSecurityRulesDisabled((c) => updateDoc(doc(c.firestore(), 'orders', 'ord-m'), { status: 'cancelled' }));
+    await assertFails(getDocs(collection(ctx(ANA), 'orders', 'ord-m', 'messages')));
+    await assertFails(msg(LUPE, 'provider'));
+    const all = await env.withSecurityRulesDisabled(async (c) => getDocs(collection(c.firestore(), 'orders', 'ord-m', 'messages')));
+    const mid = all.docs[0].id;
+    await assertSucceeds(getDocs(collection(ctx(ADMIN), 'orders', 'ord-m', 'messages')));
+    await assertFails(deleteDoc(doc(ctx(ADMIN), 'orders', 'ord-m', 'messages', mid)));
+    await assertFails(updateDoc(doc(ctx(ANA), 'orders', 'ord-m', 'messages', mid), { text: 'editado' }));
+  });
+});
+
+describe('Etapa 6: colaboradores y revisión', () => {
+  const STAFF = 'staff1';
+  it('el superadmin agrega y quita colaboradores (solo staff)', async () => {
+    const add = (uid, target, extra = {}) => setDoc(doc(ctx(uid), 'admins', target), { role: 'staff', email: `${target}@test.com`, createdAt: serverTimestamp(), createdBy: uid, ...extra });
+    await assertFails(add(ADMIN, EVA, { role: 'superadmin' }));
+    await assertFails(add(ANA, EVA, { createdBy: ANA }));
+    await assertSucceeds(add(ADMIN, EVA));
+    await assertFails(add(EVA, ANA, { createdBy: EVA }));               // un staff no agrega
+    await assertFails(deleteDoc(doc(ctx(EVA), 'admins', ADMIN)));
+    await assertFails(deleteDoc(doc(ctx(ADMIN), 'admins', ADMIN)));     // no se quita a sí mismo
+    await assertSucceeds(deleteDoc(doc(ctx(ADMIN), 'admins', EVA)));
+  });
+  it('un colaborador revisa y lee chats, pero no toca dinero ni configuración', async () => {
+    await env.withSecurityRulesDisabled((c) => setDoc(doc(c.firestore(), 'admins', STAFF), { role: 'staff' }));
+    await assertSucceeds(getDocs(collection(ctx(STAFF), 'orders')));
+    await assertFails(setDoc(doc(ctx(STAFF), 'config', 'commission'), { pct: 1, ivaPct: 16, serviceFee: 0, debtLimit: 0, updatedAt: serverTimestamp(), updatedBy: STAFF }));
+    await assertFails(setDoc(doc(ctx(STAFF), 'payouts', 'x'), { providerId: LUPE, amount: 5, createdAt: serverTimestamp(), createdBy: STAFF }));
+    await assertSucceeds(updateDoc(doc(ctx(STAFF), 'users', EVA), { status: 'review', statusNote: 'Pedido sospechoso', updatedAt: serverTimestamp() }));
+  });
+  it('cliente en revisión no puede publicar ni reservar', async () => {
+    await env.withSecurityRulesDisabled((c) => updateDoc(doc(c.firestore(), 'users', ANA), { status: 'review' }));
+    await assertFails(addDoc(collection(ctx(ANA), 'orders'), newOrder()));
+  });
+});
+
+describe('Etapa 6: mapa (cobertura, zona del socio, ubicación aproximada)', () => {
+  const req = (extra = {}) => ({
+    customerId: ANA, categoryId: 'lavanderia', zoneId: 'general-zuazua', colonia: 'Centro',
+    services: ['Lavar'], fulfillmentMode: 'dropoff', expiresAt: Timestamp.fromMillis(Date.now() + 30 * 60 * 1000),
+    status: 'open', createdAt: serverTimestamp(), updatedAt: serverTimestamp(), ...extra,
+  });
+  it('la solicitud puede llevar ubicación aproximada válida (sin otros datos)', async () => {
+    await assertSucceeds(addDoc(collection(ctx(ANA), 'requests'), req({ approxGeo: { lat: 25.89, lng: -100.11 } })));
+    await assertFails(addDoc(collection(ctx(ANA), 'requests'), req({ approxGeo: { lat: 125, lng: -100.11 } })));
+    await assertFails(addDoc(collection(ctx(ANA), 'requests'), req({ approxGeo: { lat: 25.89, lng: -100.11, address: 'Calle 1' } })));
+  });
+  it('el socio guarda su zona de servicio (punto + radio de 0.5 a 50 km)', async () => {
+    const ref = doc(ctx(LUPE), 'providers', LUPE);
+    await assertSucceeds(updateDoc(ref, { serviceArea: { lat: 25.885, lng: -100.112, radiusKm: 5 }, updatedAt: serverTimestamp() }));
+    await assertFails(updateDoc(ref, { serviceArea: { lat: 25.885, lng: -100.112, radiusKm: 500 }, updatedAt: serverTimestamp() }));
+    await assertFails(updateDoc(doc(ctx(ANA), 'providers', LUPE), { serviceArea: { lat: 1, lng: 1, radiusKm: 5 } }));
+  });
+  it('solo el admin dibuja la cobertura de una zona', async () => {
+    const zone = { name: 'General Zuazua', active: true, coverage: { lat: 25.89, lng: -100.11, radiusKm: 8 } };
+    await assertSucceeds(setDoc(doc(ctx(ADMIN), 'zones', 'general-zuazua'), zone));
+    await assertFails(setDoc(doc(ctx(ADMIN), 'zones', 'general-zuazua'), { ...zone, coverage: { lat: 25.89, lng: -100.11 } }));
+    await assertFails(setDoc(doc(ctx(LUPE), 'zones', 'general-zuazua'), zone));
+  });
+});
+
+describe('Etapa 7: PIN de entrega y fotos de evidencia', () => {
+  beforeEach(async () => { await env.withSecurityRulesDisabled((c) => setDoc(doc(c.firestore(), 'config', 'commission'), { pct: 30, ivaPct: 16, serviceFee: 10, debtLimit: 300, serverOn: true })); });
+  const put = (data) => env.withSecurityRulesDisabled((c) => setDoc(doc(c.firestore(), 'orders', 'ord-e'), { ...newOrder(), ...data }));
+  const upd = (uid, data) => updateDoc(doc(ctx(uid), 'orders', 'ord-e'), data);
+  const deliver = (extra = {}) => upd(LUPE, { status: 'delivered', finalPrice: 150, commissionPct: 30, commissionIvaPct: 16, serviceFee: 10, statusChangedAt: serverTimestamp(), ...extra });
+  it('el PIN solo lo lee el cliente (y el admin); nadie lo escribe desde la app', async () => {
+    await env.withSecurityRulesDisabled((c) => setDoc(doc(c.firestore(), 'deliveryPins', 'ord-e'), { pin: '1234', customerId: ANA, providerId: LUPE, attempts: 0 }));
+    await assertSucceeds(getDoc(doc(ctx(ANA), 'deliveryPins', 'ord-e')));
+    await assertSucceeds(getDoc(doc(ctx(ADMIN), 'deliveryPins', 'ord-e')));
+    await assertFails(getDoc(doc(ctx(LUPE), 'deliveryPins', 'ord-e')));   // el socio NO ve el PIN
+    await assertFails(getDoc(doc(ctx(EVA), 'deliveryPins', 'ord-e')));
+    await assertFails(getDocs(collection(ctx(ADMIN), 'deliveryPins')));
+    await assertFails(setDoc(doc(ctx(ANA), 'deliveryPins', 'ord-e'), { pin: '0000', customerId: ANA }));
+    await assertFails(updateDoc(doc(ctx(LUPE), 'deliveryPins', 'ord-e'), { attempts: 0 }));
+  });
+  it('entregar sin PIN exige foto de entrega de ESTE pedido', async () => {
+    await put({ status: 'ready', amountDue: 150, paymentStatus: 'cash', weightPhotoPath: 'evidence/ord-e/weight-1700000000.jpg' });
+    await assertFails(deliver());
+    await assertFails(deliver({ deliveryVerified: 'pin', deliveryPhotoPath: 'evidence/ord-e/delivery-1700000000.jpg' })); // 'pin' solo lo pone el servidor
+    await assertFails(deliver({ deliveryVerified: 'photo', deliveryPhotoPath: 'evidence/ord-x/delivery-1700000000.jpg' }));
+    await assertFails(deliver({ deliveryVerified: 'photo', deliveryPhotoPath: 'evidence/ord-e/weight-1700000000.jpg' }));
+    await assertSucceeds(deliver({ deliveryVerified: 'photo', deliveryPhotoPath: 'evidence/ord-e/delivery-1700000000.jpg' }));
+    // Solo el equipo la marca como revisada
+    await assertFails(upd(LUPE, { deliveryReviewed: true, updatedAt: serverTimestamp() }));
+    await assertFails(upd(ADMIN, { deliveryReviewed: 'si', updatedAt: serverTimestamp() }));
+    await assertSucceeds(upd(ADMIN, { deliveryReviewed: true, updatedAt: serverTimestamp() }));
+  });
+  it('con servidor: el total exige foto de báscula de ESTE pedido', async () => {
+    await put({ status: 'accepted' });
+    await assertFails(upd(LUPE, { status: 'in_progress', amountDue: 150, statusChangedAt: serverTimestamp() }));
+    await assertFails(upd(LUPE, { status: 'in_progress', amountDue: 150, weightPhotoPath: 'evidence/otro/weight-1700000000.jpg', statusChangedAt: serverTimestamp() }));
+    await assertSucceeds(upd(LUPE, { status: 'in_progress', amountDue: 150, weightPhotoPath: 'evidence/ord-e/weight-1700000000.jpg', pickupPhotoPath: 'evidence/ord-e/pickup-1700000000.jpg', statusChangedAt: serverTimestamp() }));
+  });
+  it('las fotos no se cambian después ni fuera de su paso', async () => {
+    await put({ status: 'ready', amountDue: 150, weightPhotoPath: 'evidence/ord-e/weight-1700000000.jpg' });
+    await assertFails(upd(LUPE, { status: 'delivered', weightPhotoPath: 'evidence/ord-e/weight-1700000001.jpg', statusChangedAt: serverTimestamp() }));
+    await assertFails(upd(LUPE, { deliveryVerified: 'photo', updatedAt: serverTimestamp() }));
+    await assertFails(upd(ANA, { weightPhotoPath: 'evidence/ord-e/weight-1700000002.jpg' }));
+    // corregir el total sí, con foto nueva de báscula
+    await assertSucceeds(upd(LUPE, { amountDue: 170, weightPhotoPath: 'evidence/ord-e/weight-1700000003.jpg', updatedAt: serverTimestamp() }));
+  });
+});
+
+describe('Etapa 7: modo puente (servidor apagado, sin Blaze)', () => {
+  const put = (data) => env.withSecurityRulesDisabled((c) => setDoc(doc(c.firestore(), 'orders', 'ord-s'), { ...newOrder(), ...data }));
+  const upd = (uid, data) => updateDoc(doc(ctx(uid), 'orders', 'ord-s'), data);
+  it('sin servidor: total sin foto y entrega directa sin foto ni PIN', async () => {
+    await put({ status: 'accepted' });
+    await assertSucceeds(upd(LUPE, { status: 'in_progress', amountDue: 150, statusChangedAt: serverTimestamp() }));
+    await assertSucceeds(upd(LUPE, { amountDue: 160, updatedAt: serverTimestamp() }));
+    await assertFails(upd(LUPE, { amountDue: 170, weightPhotoPath: 'evidence/otro/weight-1700000000.jpg', updatedAt: serverTimestamp() }));
+    await put({ status: 'ready', amountDue: 150, paymentStatus: 'cash' });
+    const deliver = (extra = {}) => upd(LUPE, { status: 'delivered', finalPrice: 150, commissionPct: 30, commissionIvaPct: 16, serviceFee: 10, deliveredBy: 'provider', statusChangedAt: serverTimestamp(), ...extra });
+    await assertFails(deliver({ deliveryVerified: 'pin' }));
+    await assertSucceeds(deliver());
+  });
+  it('solo el superadmin prende el servidor (booleano)', async () => {
+    const cfg = (uid, extra = {}) => setDoc(doc(ctx(uid), 'config', 'commission'), { pct: 30, ivaPct: 16, serviceFee: 10, debtLimit: 300, cardEnabled: false, serverOn: true, updatedAt: serverTimestamp(), updatedBy: uid, ...extra });
+    await assertFails(cfg(LUPE));
+    await assertFails(cfg(ADMIN, { serverOn: 'si' }));
+    await assertSucceeds(cfg(ADMIN));
   });
 });

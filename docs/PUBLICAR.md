@@ -8,7 +8,7 @@ Hay tres cosas que publicar:
 | Qué | Dónde | Costo | Estado |
 |---|---|---|---|
 | App web de clientes y proveedores (la misma app Expo, versión web) | Cloudflare Pages | Gratis, con dirección `*.pages.dev` | Preparada (sin probar) |
-| Panel administrativo web | Cloudflare Pages (otro proyecto) | Gratis | Etapa 6 |
+| Panel administrativo web (`admin/`) | Cloudflare Pages (otro proyecto, subir ZIP) | Gratis | Listo para subir — pasos en `admin/LEEME.md` |
 | App Android | Expo EAS → APK de prueba / Google Play | APK de prueba gratis; Play Store: pago único de USD 25 | Preparada (sin probar) |
 | App iPhone | Expo EAS → TestFlight / App Store | Apple Developer: USD 99 al año | Preparada (sin probar) |
 
@@ -93,6 +93,6 @@ Sin esa membresía no es posible instalar una compilación propia en un iPhone f
 
 ### Decisiones que debes confirmar antes de la primera compilación de tienda
 
-- **Identificador de la app:** en `app.json` puse `mx.bubu.app` (iOS `bundleIdentifier` y Android `package`). **No se puede cambiar después de publicar.** Si prefieres otro (por ejemplo `com.tuempresa.bubu`), cámbialo antes.
+- **Identificador de la app:** en `app.json` puse `com.joseibarra.bubu` (iOS `bundleIdentifier` y Android `package`). **No se puede cambiar después de publicar.** Si prefieres otro (por ejemplo `com.tuempresa.bubu`), cámbialo antes.
 - **Icono y pantalla de inicio:** faltan las imágenes (`icon.png` 1024×1024, `adaptive-icon.png`, `splash`). Hoy Expo usa unas genéricas.
 - **Aviso de privacidad y términos:** las tiendas los exigen (enlace público).

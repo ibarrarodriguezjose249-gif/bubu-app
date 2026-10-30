@@ -13,7 +13,10 @@ rules_version = '2';
 //   • Un proveedor no aprobado no publica servicios ni recibe pedidos.
 //   • Los pedidos solo los ven el cliente, el proveedor y los admins, y su
 //     estado solo avanza por las transiciones permitidas.
-//   • No hay pagos: `priceEstimate` / `priceFrom` son solo informativos.
+//   • `priceEstimate` / `priceFrom` son solo informativos.
+//     `finalPrice` (lo que el socio cobró) solo sirve para calcular la comisión.
+//   • Pago con tarjeta (Stripe): solo el SERVIDOR marca un pedido como
+//     pagado ('paid'), después de confirmar el pago con Stripe.
 //
 //  La tabla de transiciones de pedidos está duplicada en
 //  mobile/src/constants/orderStatus.js. Si cambias una, cambia la otra.
@@ -30,6 +33,15 @@ service cloud.firestore {
       return signedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
     }
 
+    // Dueño de BÜBÜ (role 'superadmin'). Los colaboradores (role 'staff') son admins
+    // normales: revisan, aprueban, suspenden y leen chats, pero NO tocan dinero, la
+    // configuración de comisiones ni la lista de colaboradores.
+    function isSuperAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+        && get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.role == 'superadmin';
+    }
+
     function isActiveUser() {
       return signedIn()
         && exists(/databases/$(database)/documents/users/$(request.auth.uid))
@@ -40,9 +52,13 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/providers/$(id)).data;
     }
 
+    // Aprobado y SIN bloqueo por adeudo (debtBlocks/{uid} lo crea o borra solo el servidor,
+    // cuando el saldo del socio pasa el límite de adeudo). Bloqueado: no ve ni recibe
+    // pedidos nuevos, pero sí puede terminar los que ya tiene.
     function isApprovedProviderId(id) {
       return exists(/databases/$(database)/documents/providers/$(id))
-        && providerData(id).status == 'approved';
+        && providerData(id).status == 'approved'
+        && !exists(/databases/$(database)/documents/debtBlocks/$(id));
     }
 
     function isApprovedProvider() {
@@ -65,6 +81,16 @@ service cloud.firestore {
 
     function isStr(v, minLen, maxLen) { return v is string && v.size() >= minLen && v.size() <= maxLen; }
     function optStr(d, key, maxLen) { return !(key in d) || isStr(d[key], 0, maxLen); }
+    // Mapa: punto (lat/lng) y área de servicio (punto + radio en km).
+    function validGeo(m) {
+      return m is map && m.keys().hasAll(['lat', 'lng'])
+        && m.lat is number && m.lat >= -90 && m.lat <= 90
+        && m.lng is number && m.lng >= -180 && m.lng <= 180;
+    }
+    function validArea(m) {
+      return validGeo(m) && m.keys().hasOnly(['lat', 'lng', 'radiusKm'])
+        && m.radiusKm is number && m.radiusKm >= 0.5 && m.radiusKm <= 50;
+    }
     function isPrice(v) { return v is number && v >= 0 && v <= 100000; }
     function isModeList(v) {
       return v is list && v.size() >= 1 && v.size() <= 2 && v.hasOnly(['dropoff', 'pickup_delivery']);
@@ -83,7 +109,18 @@ service cloud.firestore {
     match /admins/{adminId} {
       allow get: if signedIn() && (me() == adminId || isAdmin());
       allow list: if isAdmin();
-      allow write: if false;
+      // El superadmin agrega colaboradores (solo 'staff', con cuenta de BÜBÜ existente)
+      // y los quita. Nadie se da permisos a sí mismo ni crea otro superadmin.
+      allow create: if isSuperAdmin() && adminId != me()
+        && exists(/databases/$(database)/documents/users/$(adminId))
+        && request.resource.data.keys().hasOnly(['role', 'email', 'name', 'createdAt', 'createdBy'])
+        && request.resource.data.role == 'staff'
+        && optStr(request.resource.data, 'email', 120)
+        && optStr(request.resource.data, 'name', 80)
+        && request.resource.data.createdBy == me()
+        && request.resource.data.createdAt == request.time;
+      allow delete: if isSuperAdmin() && adminId != me() && resource.data.role == 'staff';
+      allow update: if false;
     }
 
     // ───────────── Usuarios ─────────────
@@ -116,7 +153,7 @@ service cloud.firestore {
 
     function validAdminUserUpdate() {
       return changedKeys().hasOnly(['status', 'statusNote', 'updatedAt'])
-        && request.resource.data.status in ['active', 'suspended']
+        && request.resource.data.status in ['active', 'review', 'suspended']
         && optStr(request.resource.data, 'statusNote', 300);
     }
 
@@ -157,8 +194,10 @@ service cloud.firestore {
       let d = request.resource.data;
       let old = resource.data;
       return old.status != 'suspended'
-        && changedKeys().hasOnly(['businessName', 'description', 'providerType', 'categoryIds', 'zoneIds', 'fulfillmentModes', 'status', 'isAvailable', 'lastSeenAt', 'updatedAt'])
+        && changedKeys().hasOnly(['businessName', 'description', 'providerType', 'categoryIds', 'zoneIds', 'fulfillmentModes', 'status', 'isAvailable', 'lastSeenAt', 'serviceArea', 'updatedAt'])
         && validProviderFields(d)
+        // Zona de servicio en el mapa (punto aproximado + radio).
+        && (!('serviceArea' in changedKeys()) || validArea(d.serviceArea))
         // El estado no cambia, salvo reenviar una solicitud rechazada.
         && (d.status == old.status || (old.status == 'rejected' && d.status == 'pending'))
         // Disponibilidad ("Estoy disponible") y última conexión.
@@ -203,7 +242,9 @@ service cloud.firestore {
       allow create, update: if isAdmin()
         && isStr(request.resource.data.name, 2, 80)
         && request.resource.data.active is bool
-        && (!('colonias' in request.resource.data) || (request.resource.data.colonias is list && request.resource.data.colonias.size() <= 300));
+        && (!('colonias' in request.resource.data) || (request.resource.data.colonias is list && request.resource.data.colonias.size() <= 300))
+        // Cobertura de la zona dibujada en el mapa del panel (centro + radio).
+        && (!('coverage' in request.resource.data) || validArea(request.resource.data.coverage));
       allow delete: if isAdmin();
     }
 
@@ -242,7 +283,9 @@ service cloud.firestore {
     // solo colonia y qué necesita. Los datos de contacto se comparten únicamente
     // con el proveedor elegido, dentro del pedido (orders).
     function validRequestCreate(d) {
-      return d.keys().hasOnly(['customerId', 'customerName', 'categoryId', 'zoneId', 'colonia', 'description', 'services', 'quantityText', 'whenText', 'fulfillmentMode', 'preferredDate', 'expiresAt', 'status', 'createdAt', 'updatedAt'])
+      return d.keys().hasOnly(['customerId', 'customerName', 'categoryId', 'zoneId', 'colonia', 'approxGeo', 'description', 'services', 'quantityText', 'whenText', 'fulfillmentMode', 'preferredDate', 'expiresAt', 'status', 'createdAt', 'updatedAt'])
+        // Ubicación APROXIMADA del cliente (~1 km) para saber qué socios le quedan cerca.
+        && (!('approxGeo' in d) || (validGeo(d.approxGeo) && d.approxGeo.keys().hasOnly(['lat', 'lng'])))
         && d.customerId == me()
         && optStr(d, 'customerName', 80)
         && categoryActive(d.categoryId)
@@ -343,6 +386,29 @@ service cloud.firestore {
       }
     }
 
+    // ───────────── Comisión de BÜBÜ ─────────────
+    // Por cada pedido entregado se le descuenta al socio: total × % de comisión,
+    // más IVA sobre esa comisión. Lo fija el admin en config/commission; si todavía
+    // no existe: 30 % de comisión y 16 % de IVA.
+    function validCommissionPct(v) { return v is number && v >= 0 && v <= 40; }
+    function validIvaPct(v) { return v is number && v >= 0 && v <= 16; }
+    function commissionConfig() { return /databases/$(database)/documents/config/commission; }
+    // ¿Ya está activo el servidor (plan Blaze: Storage + Cloud Functions)?
+    // Lo prende el admin en Pagos a socios. Apagado: no se exigen fotos ni PIN.
+    function serverOn() {
+      return exists(commissionConfig()) && get(commissionConfig()).data.get('serverOn', false) == true;
+    }
+    function currentCommissionPct() {
+      return exists(commissionConfig()) ? get(commissionConfig()).data.pct : 30;
+    }
+    function currentIvaPct() {
+      return exists(commissionConfig()) ? get(commissionConfig()).data.get('ivaPct', 16) : 16;
+    }
+    // Cuota de servicio: la paga TODO cliente (tarjeta o efectivo); es 100 % de BÜBÜ.
+    function currentServiceFee() {
+      return exists(commissionConfig()) ? get(commissionConfig()).data.get('serviceFee', 10) : 10;
+    }
+
     // ───────────── Pedidos y reservas ─────────────
     // Reserva = pedido con `scheduledAt` (fecha acordada). Mismo flujo de estados.
     function providerNext() {
@@ -412,16 +478,128 @@ service cloud.firestore {
         && getAfter(/databases/$(database)/documents/requests/$(d.requestId)).data.chosenProviderId == d.providerId;
     }
 
-    function providerOrderUpdate() {
+    // Fotos de evidencia del pedido (Storage: evidence/{orderId}/{tipo}-{número}.jpg).
+    function validEvidence(p, orderId, kind) {
+      return p is string && p.matches('evidence/' + orderId + '/' + kind + '-[0-9]{6,20}[.](jpg|jpeg|png|webp|heic|heif)');
+    }
+
+    function providerOrderUpdate(orderId) {
       let d = request.resource.data;
       let old = resource.data;
       return old.providerId == me()
-        && changedKeys().hasOnly(['status', 'statusChangedAt', 'updatedAt', 'providerPhone', 'cancelReason'])
+        && changedKeys().hasOnly(['status', 'statusChangedAt', 'updatedAt', 'providerPhone', 'cancelReason', 'finalPrice', 'commissionPct', 'commissionIvaPct', 'serviceFee', 'amountDue', 'transferInfo', 'deliveredBy', 'weightPhotoPath', 'pickupPhotoPath', 'deliveryPhotoPath', 'deliveryVerified'])
         && old.status in providerNext()
         && d.status in providerNext()[old.status]
         && d.statusChangedAt == request.time
         && optStr(d, 'providerPhone', 20)
-        && optStr(d, 'cancelReason', 300);
+        && optStr(d, 'cancelReason', 300)
+        // Al recibir y pesar la ropa (→ in_progress) el socio puede anotar el total a pagar.
+        // Con foto OBLIGATORIA de la báscula (y opcional de la bolsa al recolectar).
+        // (Con el servidor apagado la foto es opcional.)
+        && (!changedKeys().hasAny(['amountDue']) || (d.status == 'in_progress' && validAmount(d.amountDue) && (!serverOn() || validEvidence(d.weightPhotoPath, orderId, 'weight'))))
+        && (!changedKeys().hasAny(['weightPhotoPath', 'pickupPhotoPath']) || d.status == 'in_progress')
+        && (!('weightPhotoPath' in changedKeys()) || validEvidence(d.weightPhotoPath, orderId, 'weight'))
+        && (!('pickupPhotoPath' in changedKeys()) || validEvidence(d.pickupPhotoPath, orderId, 'pickup'))
+        // …y sus datos para recibir transferencias (los ve solo el cliente de ESTE pedido).
+        && (!changedKeys().hasAny(['transferInfo']) || (d.status == 'in_progress' && validTransferInfo(d.transferInfo)))
+        // Al ENTREGAR queda fijo el total y el % de comisión vigente.
+        // Si ya había total a pagar (el que vio y pagó el cliente), el total es ESE:
+        // el socio no lo puede bajar al entregar.
+        // En cualquier otro paso no se puede tocar ni el total ni el %.
+        && (d.status == 'delivered'
+              ? (isPrice(d.finalPrice) && d.finalPrice > 0 && d.commissionPct == currentCommissionPct()
+                  && d.commissionIvaPct == currentIvaPct()
+                  && (!('amountDue' in old) || d.finalPrice == old.amountDue)
+                  && (!('deliveredBy' in d) || d.deliveredBy == 'provider')
+                  // Entregar directo (sin PIN) exige FOTO de la entrega y queda para revisión.
+                  // Con PIN, la entrega la registra el servidor (función entregarConPin).
+                  // (Con el servidor apagado no hay PIN: se entrega directo, sin foto.)
+                  && (serverOn()
+                        ? (d.deliveryVerified == 'photo' && validEvidence(d.deliveryPhotoPath, orderId, 'delivery'))
+                        : !changedKeys().hasAny(['deliveryVerified', 'deliveryPhotoPath']))
+                  // Pagado con tarjeta: total = lo pagado y la cuota ya la fijó el servidor.
+                  // En efectivo: el socio cobró también la cuota vigente (se suma a su adeudo).
+                  && (old.get('paymentStatus', 'pending') == 'paid'
+                        ? (d.finalPrice == old.amountDue && !changedKeys().hasAny(['serviceFee']))
+                        : d.serviceFee == currentServiceFee()))
+              : !changedKeys().hasAny(['finalPrice', 'commissionPct', 'commissionIvaPct', 'serviceFee', 'deliveryPhotoPath', 'deliveryVerified']));
+    }
+
+    function validAmount(v) { return isPrice(v) && v > 0; }
+
+    // Cuenta del socio para que el cliente le transfiera DIRECTO (BÜBÜ no toca ese dinero).
+    function validTransferInfo(m) {
+      return m is map
+        && m.keys().hasOnly(['holder', 'bank', 'account', 'note'])
+        && isStr(m.holder, 2, 80)
+        && optStr(m, 'bank', 40)
+        && isStr(m.account, 6, 40)
+        && optStr(m, 'note', 100);
+    }
+
+    // El socio corrige el total a pagar mientras el cliente NO haya pagado con tarjeta.
+    function providerAmountUpdate(orderId) {
+      let old = resource.data;
+      return old.providerId == me()
+        && old.status in ['in_progress', 'ready']
+        && changedKeys().hasOnly(['amountDue', 'transferInfo', 'weightPhotoPath', 'updatedAt'])
+        && !(old.get('paymentStatus', 'pending') in ['paid', 'review', 'transfer_ok'])
+        && validAmount(request.resource.data.amountDue)
+        && (!changedKeys().hasAny(['transferInfo']) || validTransferInfo(request.resource.data.transferInfo))
+        // Total nuevo sin foto de báscula previa → la pide.
+        && ('weightPhotoPath' in changedKeys()
+              ? validEvidence(request.resource.data.weightPhotoPath, orderId, 'weight')
+              : (!serverOn() || 'weightPhotoPath' in old));
+    }
+
+    // El socio confirma que SÍ le llegó la transferencia del cliente.
+    function providerConfirmTransfer() {
+      let old = resource.data;
+      return old.providerId == me()
+        && old.status in ['in_progress', 'ready', 'delivered']
+        && old.get('paymentStatus', 'pending') == 'transfer'
+        && changedKeys().hasOnly(['paymentStatus', 'updatedAt'])
+        && request.resource.data.paymentStatus == 'transfer_ok';
+    }
+
+    // El cliente elige: aún no decide / tarjeta ('pending'), efectivo ('cash') o transferencia al socio ('transfer').
+    // Nadie desde la app puede marcar 'paid': eso lo hace el servidor al confirmar
+    // el pago con Stripe.
+    // Al elegir transferencia puede reportar "Ya transferí": clave de rastreo y foto del
+    // comprobante (la foto vive en Storage, en receipts/{orderId}/…).
+    function customerPaymentChoice(orderId) {
+      let old = resource.data;
+      let d = request.resource.data;
+      return old.customerId == me()
+        && old.status in ['in_progress', 'ready', 'delivered']
+        && changedKeys().hasOnly(['paymentStatus', 'updatedAt', 'transferRef', 'receiptPath', 'transferReportedAt'])
+        && old.get('paymentStatus', 'pending') in ['pending', 'cash', 'transfer']
+        && d.paymentStatus in ['pending', 'cash', 'transfer']
+        // Ya entregado: solo puede reportar su transferencia, no cambiar de forma de pago.
+        && (old.status != 'delivered' || d.paymentStatus == 'transfer')
+        && (!changedKeys().hasAny(['transferRef', 'receiptPath', 'transferReportedAt'])
+            || (d.paymentStatus == 'transfer'
+                && optStr(d, 'transferRef', 40)
+                && (!('receiptPath' in d) || (d.receiptPath is string && d.receiptPath.matches('receipts/' + orderId + '/[A-Za-z0-9_.-]{1,80}')))
+                && d.transferReportedAt == request.time));
+    }
+
+    // "Ya recibí mi ropa": el cliente cierra el pedido si el socio no lo hizo.
+    // El total es el que el cliente vio (amountDue) y el % lo pone el sistema.
+    function customerDeliver() {
+      let old = resource.data;
+      let d = request.resource.data;
+      return old.customerId == me()
+        && old.status in ['in_progress', 'ready']
+        && 'amountDue' in old
+        && changedKeys().hasOnly(['status', 'statusChangedAt', 'updatedAt', 'finalPrice', 'commissionPct', 'commissionIvaPct', 'serviceFee', 'deliveredBy'])
+        && d.status == 'delivered'
+        && d.statusChangedAt == request.time
+        && d.finalPrice == old.amountDue
+        && d.commissionPct == currentCommissionPct()
+        && d.commissionIvaPct == currentIvaPct()
+        && (old.get('paymentStatus', 'pending') == 'paid' ? !changedKeys().hasAny(['serviceFee']) : d.serviceFee == currentServiceFee())
+        && d.deliveredBy == 'customer';
     }
 
     function customerOrderUpdate() {
@@ -437,16 +615,51 @@ service cloud.firestore {
 
     function adminOrderUpdate() {
       return isAdmin()
-        && changedKeys().hasOnly(['status', 'statusChangedAt', 'updatedAt', 'adminNote'])
+        && changedKeys().hasOnly(['status', 'statusChangedAt', 'updatedAt', 'adminNote', 'finalPrice', 'commissionPct', 'commissionIvaPct', 'serviceFee', 'paymentStatus', 'deliveryReviewed'])
         && request.resource.data.status in allStatuses()
-        && optStr(request.resource.data, 'adminNote', 500);
+        // El equipo marca como revisada una entrega hecha con foto (sin PIN).
+        && (!changedKeys().hasAny(['deliveryReviewed']) || request.resource.data.deliveryReviewed is bool)
+        && optStr(request.resource.data, 'adminNote', 500)
+        // Resolver pagos (p. ej. reembolso hecho en Stripe, o pago en revisión).
+        && (!changedKeys().hasAny(['paymentStatus'])
+            || request.resource.data.paymentStatus in ['pending', 'cash', 'transfer', 'transfer_ok', 'paid', 'review', 'refunded'])
+        // El admin puede corregir el total o el % solo en pedidos entregados.
+        && (!changedKeys().hasAny(['finalPrice', 'commissionPct', 'commissionIvaPct', 'serviceFee'])
+            || (request.resource.data.status == 'delivered'
+                && isPrice(request.resource.data.finalPrice)
+                && validCommissionPct(request.resource.data.commissionPct)
+                && validIvaPct(request.resource.data.get('commissionIvaPct', 0))
+                && isPrice(request.resource.data.get('serviceFee', 0))));
     }
 
     match /orders/{orderId} {
       allow get, list: if signedIn() && (resource.data.customerId == me() || resource.data.providerId == me() || isAdmin());
       allow create: if isActiveUser() && validOrderCreate(request.resource.data, orderId);
-      allow update: if signedIn() && (providerOrderUpdate() || customerOrderUpdate() || adminOrderUpdate());
+      allow update: if signedIn() && (providerOrderUpdate(orderId) || providerAmountUpdate(orderId) || providerConfirmTransfer() || customerOrderUpdate() || customerPaymentChoice(orderId) || customerDeliver() || adminOrderUpdate());
       allow delete: if false;
+
+      // ───── Chat del pedido (cliente ↔ socio) ─────
+      // Cada pedido tiene su propia conversación. El cliente y el socio la ven SOLO
+      // mientras el pedido está activo (y 48 h después de entregado); luego desaparece
+      // para ellos y no se ve en otros pedidos. El admin la puede leer siempre para
+      // revisar. Nadie puede editar ni borrar mensajes.
+      function chatOrder() { return get(/databases/$(database)/documents/orders/$(orderId)).data; }
+      function chatParticipant() { return signedIn() && (chatOrder().customerId == me() || chatOrder().providerId == me()); }
+      function chatOpen() {
+        let o = chatOrder();
+        return o.status in ['requested', 'accepted', 'in_progress', 'ready']
+          || (o.status == 'delivered' && o.get('statusChangedAt', request.time) > request.time - duration.value(48, 'h'));
+      }
+      match /messages/{messageId} {
+        allow read: if isAdmin() || (chatParticipant() && chatOpen());
+        allow create: if chatParticipant() && chatOpen()
+          && request.resource.data.keys().hasOnly(['senderId', 'senderRole', 'text', 'createdAt'])
+          && request.resource.data.senderId == me()
+          && request.resource.data.senderRole == (chatOrder().customerId == me() ? 'customer' : 'provider')
+          && isStr(request.resource.data.text, 1, 1000)
+          && request.resource.data.createdAt == request.time;
+        allow update, delete: if false;
+      }
     }
 
     // ───────────── Calificaciones (id = id del pedido → una por pedido) ─────────────
@@ -485,6 +698,120 @@ service cloud.firestore {
         && optStr(request.resource.data, 'hiddenNote', 300)
         && (!('hiddenBy' in changedKeys()) || request.resource.data.hiddenBy == me());
       allow delete: if false;
+    }
+
+    // ───────────── Configuración general (solo admin escribe) ─────────────
+    match /config/{docId} {
+      allow get: if signedIn();
+      allow list: if isAdmin();
+      // pct: % de comisión · ivaPct: IVA sobre la comisión · serviceFee: cuota de servicio
+      // que paga el cliente con tarjeta (pesos) · debtLimit: adeudo máximo antes de bloquear.
+      allow create, update: if isSuperAdmin() && docId == 'commission'
+        && request.resource.data.keys().hasOnly(['pct', 'ivaPct', 'serviceFee', 'debtLimit', 'cardEnabled', 'serverOn', 'updatedAt', 'updatedBy'])
+        && (!('cardEnabled' in request.resource.data) || request.resource.data.cardEnabled is bool)
+        && (!('serverOn' in request.resource.data) || request.resource.data.serverOn is bool)
+        && validCommissionPct(request.resource.data.pct)
+        && validIvaPct(request.resource.data.ivaPct)
+        && isPrice(request.resource.data.serviceFee) && request.resource.data.serviceFee <= 200
+        && isPrice(request.resource.data.debtLimit)
+        && request.resource.data.updatedBy == me()
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
+    }
+
+    // ───────────── Pagos de comisión que hacen los socios a BÜBÜ ─────────────
+    // Los registra el admin cuando el socio le paga (transferencia, efectivo…).
+    // El socio solo ve los suyos. No se editan; si se capturó mal, se borra
+    // (y queda registrado en la bitácora) y se captura de nuevo.
+    match /commissionPayments/{paymentId} {
+      allow get, list: if signedIn() && (resource.data.providerId == me() || isAdmin());
+      allow create: if isSuperAdmin()
+        && request.resource.data.keys().hasOnly(['providerId', 'providerName', 'amount', 'method', 'note', 'createdAt', 'createdBy'])
+        && request.resource.data.keys().hasAll(['providerId', 'amount', 'createdAt', 'createdBy'])
+        && isStr(request.resource.data.providerId, 1, 128)
+        && optStr(request.resource.data, 'providerName', 80)
+        && request.resource.data.amount is number
+        && request.resource.data.amount > 0 && request.resource.data.amount <= 1000000
+        && optStr(request.resource.data, 'method', 40)
+        && optStr(request.resource.data, 'note', 300)
+        && request.resource.data.createdBy == me()
+        && request.resource.data.createdAt == request.time;
+      allow update: if false;
+      allow delete: if isSuperAdmin();
+    }
+
+    // ───────────── Pagos semanales de BÜBÜ a los socios (corte) ─────────────
+    // Lo que BÜBÜ le transfiere al socio por pedidos pagados con tarjeta,
+    // ya sin comisión. Los registra el admin; el socio solo ve los suyos.
+    match /payouts/{payoutId} {
+      allow get, list: if signedIn() && (resource.data.providerId == me() || isAdmin());
+      allow create: if isSuperAdmin()
+        && request.resource.data.keys().hasOnly(['providerId', 'providerName', 'amount', 'method', 'period', 'note', 'createdAt', 'createdBy'])
+        && request.resource.data.keys().hasAll(['providerId', 'amount', 'createdAt', 'createdBy'])
+        && isStr(request.resource.data.providerId, 1, 128)
+        && optStr(request.resource.data, 'providerName', 80)
+        && request.resource.data.amount is number
+        && request.resource.data.amount > 0 && request.resource.data.amount <= 1000000
+        && optStr(request.resource.data, 'method', 40)
+        && optStr(request.resource.data, 'period', 60)
+        && optStr(request.resource.data, 'note', 300)
+        && request.resource.data.createdBy == me()
+        && request.resource.data.createdAt == request.time;
+      allow update: if false;
+      allow delete: if isSuperAdmin();
+    }
+
+    // ───────────── Cuenta del socio para recibir transferencias (id = UID) ─────────────
+    // Solo él y el admin la ven aquí. Al cliente le llega copiada dentro de SU pedido.
+    match /providerPayInfo/{providerId} {
+      allow get: if signedIn() && (me() == providerId || isAdmin());
+      allow list: if isAdmin();
+      allow create, update: if signedIn() && me() == providerId
+        && request.resource.data.keys().hasOnly(['holder', 'bank', 'account', 'note', 'updatedAt'])
+        && isStr(request.resource.data.holder, 2, 80)
+        && optStr(request.resource.data, 'bank', 40)
+        && isStr(request.resource.data.account, 6, 40)
+        && optStr(request.resource.data, 'note', 100)
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if signedIn() && me() == providerId;
+    }
+
+    // ───────────── PIN de entrega (lo crea el servidor; SOLO el cliente lo ve) ─────────────
+    // El socio nunca lo puede leer: lo escribe al entregar y el servidor lo revisa
+    // (máximo 5 intentos).
+    match /deliveryPins/{orderId} {
+      allow get: if signedIn() && (resource.data.customerId == me() || isAdmin());
+      allow list: if false;
+      allow write: if false;
+    }
+
+    // ───────────── Saldo del socio (lo calcula y escribe SOLO el servidor) ─────────────
+    match /providerBalances/{providerId} {
+      allow get: if signedIn() && (me() == providerId || isAdmin());
+      allow list: if isAdmin();
+      allow write: if false;
+    }
+    match /debtBlocks/{providerId} {
+      allow get: if signedIn() && (me() == providerId || isAdmin());
+      allow list: if isAdmin();
+      allow write: if false;
+    }
+
+    // ───────────── Avisos al teléfono (id = UID) ─────────────
+    // Cada quien guarda o borra SOLO el token de notificaciones de su teléfono.
+    // Nadie más lo puede leer ni listar: lo usa el servidor (Cloud Functions),
+    // que no pasa por estas reglas.
+    match /pushTokens/{userId} {
+      allow get: if signedIn() && me() == userId;
+      allow list: if false;
+      allow create, update: if signedIn() && me() == userId
+        && request.resource.data.keys().hasOnly(['token', 'platform', 'app', 'updatedAt'])
+        && isStr(request.resource.data.token, 20, 200)
+        && request.resource.data.token.matches('Expo(nent)?PushToken.+')
+        && request.resource.data.platform in ['android', 'ios']
+        && optStr(request.resource.data, 'app', 20)
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if signedIn() && me() == userId;
     }
 
     // ───────────── Bitácora administrativa (solo agregar) ─────────────

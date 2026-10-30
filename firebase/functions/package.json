@@ -1,0 +1,17 @@
+{
+  "name": "bubu-functions",
+  "version": "0.4.0",
+  "private": true,
+  "description": "Servidor de BÜBÜ: notificaciones push, pagos con Stripe (modo prueba) y saldos de socios",
+  "main": "index.js",
+  "engines": {
+    "node": "22"
+  },
+  "dependencies": {
+    "firebase-admin": "^13.4.0",
+    "firebase-functions": "^6.4.0"
+  },
+  "scripts": {
+    "test": "node --test test/lib.test.js test/stripe.test.js test/saldos.test.js test/entrega.test.js"
+  }
+}

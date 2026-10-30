@@ -1,0 +1,55 @@
+rules_version = '2';
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  BÜBÜ — Reglas de Firebase Storage (archivos)
+//  Lo único que se guarda: fotos de comprobantes de transferencia (las sube el
+//  cliente) y fotos de evidencia del pedido (las sube el socio).
+//   • Comprobantes: solo el CLIENTE del pedido los sube.
+//   • Evidencia (bolsa en báscula, al recolectar y al entregar): solo el SOCIO del pedido.
+//   • Imagen, máximo 5 MB. La ven solo el cliente, el socio de ese pedido y los admins.
+//   • No se edita ni se borra desde la app.
+//  Todo lo demás está prohibido.
+// ═══════════════════════════════════════════════════════════════════════════
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /receipts/{orderId}/{fileName} {
+      function order() {
+        return firestore.get(/databases/(default)/documents/orders/$(orderId)).data;
+      }
+      function isAdmin() {
+        return firestore.exists(/databases/(default)/documents/admins/$(request.auth.uid));
+      }
+      allow read: if request.auth != null
+        && (order().customerId == request.auth.uid || order().providerId == request.auth.uid || isAdmin());
+      allow create: if request.auth != null
+        && order().customerId == request.auth.uid
+        && order().status in ['in_progress', 'ready', 'delivered']
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|jpg|png|webp|heic|heif)')
+        && fileName.matches('[A-Za-z0-9_.-]{1,80}');
+      allow update, delete: if false;
+    }
+    // Fotos de evidencia que toma el SOCIO: báscula, bolsa al recolectar y entrega.
+    // Se borran solas a los 90 días (regla de ciclo de vida del bucket; ver docs).
+    match /evidence/{orderId}/{fileName} {
+      function order() {
+        return firestore.get(/databases/(default)/documents/orders/$(orderId)).data;
+      }
+      function isAdmin() {
+        return firestore.exists(/databases/(default)/documents/admins/$(request.auth.uid));
+      }
+      allow read: if request.auth != null
+        && (order().customerId == request.auth.uid || order().providerId == request.auth.uid || isAdmin());
+      allow create: if request.auth != null
+        && order().providerId == request.auth.uid
+        && order().status in ['accepted', 'in_progress', 'ready']
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|jpg|png|webp|heic|heif)')
+        && fileName.matches('(weight|pickup|delivery)-[0-9]{6,20}[.](jpg|jpeg|png|webp|heic|heif)');
+      allow update, delete: if false;
+    }
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
