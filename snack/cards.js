@@ -1,16 +1,18 @@
 // Tarjetas de la Etapa 4: ofertas, proveedores, pedidos publicados y pedidos.
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { colors } from './brand';
+import { colors, fonts, shadow } from './brand';
 import { FULFILLMENT_MODES } from './constants_catalog';
 import { ORDER_STATUS } from './orderStatus';
 import { ASAP, PROVIDER_TYPES, REQUEST_STATE, TIME_SLOTS, nextDays, whenLabel } from './constants_requests';
 import { countdown, formatMoney, timeAgo } from './time';
 import { isOnline } from './providers';
 import { requestSummary } from './services_requests';
-import { Badge, Button, Chip, styles as ui } from './ui';
+import { Badge, Button, Chip, IconLine, styles as ui } from './ui';
+import Icon from './Icon';
 import { RatingBadge, ReviewList } from './Rating';
 import { ratingSummary } from './reviews';
+import { bagCode } from './evidence';
 
 // Grupo de chips: selección única (value) o múltiple (values).
 export function ChipGroup({ options, value, values, onChange, labels }) {
@@ -38,8 +40,8 @@ export function ChipGroup({ options, value, values, onChange, labels }) {
 export function OnlineDot({ online }) {
   return (
     <View style={s.dotRow}>
-      <View style={[s.dot, { backgroundColor: online ? '#1fb36b' : '#b7c0cf' }]} />
-      <Text style={[s.small, { color: online ? '#127a4a' : colors.muted }]}>{online ? 'Disponible ahora' : 'No conectado'}</Text>
+      <View style={[s.dot, { backgroundColor: online ? colors.success : '#b7c0cf' }]} />
+      <Text style={[s.small, { color: online ? colors.successText : colors.muted }]}>{online ? 'Disponible ahora' : 'No conectado'}</Text>
     </View>
   );
 }
@@ -54,13 +56,13 @@ export function OfferCard({ offer, tags = [], onChoose, chosen, disabled, review
       {reviews !== undefined && <RatingBadge summary={ratingSummary(reviews)} style={{ marginTop: 8 }} />}
       {(tags.length > 0 || offer.kind === 'accept' || PROVIDER_TYPES[offer.providerType]) && (
         <View style={[ui.wrap, { gap: 6, marginTop: 8 }]}>
-          {offer.kind === 'accept' && <Badge tone="success">👍 Acepta tu horario</Badge>}
-          {tags.map((t) => <Badge key={t} tone="success">{t}</Badge>)}
+          {offer.kind === 'accept' && <Badge tone="success" icon="thumbs-up-outline">Acepta tu horario</Badge>}
+          {tags.map((t) => <Badge key={t.label} tone="success" icon={t.icon}>{t.label}</Badge>)}
           <ProviderTypeBadge type={offer.providerType} />
         </View>
       )}
-      {!!offer.pickupText && <Text style={s.line}>🚗 Recoge / recibe: <Text style={s.strong}>{offer.pickupText}</Text></Text>}
-      {!!offer.readyText && <Text style={s.line}>✅ Listo: <Text style={s.strong}>{offer.readyText}</Text></Text>}
+      {!!offer.pickupText && <IconLine icon="car-outline" color={colors.ink}>Recoge / recibe: <Text style={s.strong}>{offer.pickupText}</Text></IconLine>}
+      {!!offer.readyText && <IconLine icon="checkmark-circle-outline" color={colors.ink}>Listo: <Text style={s.strong}>{offer.readyText}</Text></IconLine>}
       {!!offer.message && <Text style={s.msg}>“{offer.message}”</Text>}
       {reviews !== undefined && <ReviewList reviews={reviews} max={1} now={now} />}
       {chosen ? (
@@ -73,7 +75,7 @@ export function OfferCard({ offer, tags = [], onChoose, chosen, disabled, review
 }
 
 export function ProviderCard({ provider, onBook, now, reviews }) {
-  const modes = (provider.fulfillmentModes || []).map((m) => `${FULFILLMENT_MODES[m]?.icon || ''} ${FULFILLMENT_MODES[m]?.providerLabel || m}`);
+  const modes = (provider.fulfillmentModes || []).map((m) => FULFILLMENT_MODES[m]?.providerLabel || m);
   return (
     <View style={s.card}>
       <View style={ui.row}>
@@ -85,7 +87,7 @@ export function ProviderCard({ provider, onBook, now, reviews }) {
         <ProviderTypeBadge type={provider.providerType} />
       </View>
       {!!provider.description && <Text style={s.line} numberOfLines={3}>{provider.description}</Text>}
-      <Text style={s.small}>{modes.join('  ·  ')}</Text>
+      <IconLine icon="swap-horizontal-outline">{modes.join('  ·  ')}</IconLine>
       {reviews !== undefined && <ReviewList reviews={reviews} max={2} now={now} />}
       {onBook && <Button title="Reservar directo" variant="outline" onPress={onBook} />}
     </View>
@@ -98,12 +100,12 @@ export function RequestCard({ request, state, now, offersCount, onPress, footer 
     <Pressable onPress={onPress} style={({ pressed }) => [s.card, pressed && { opacity: 0.9 }]} accessibilityRole="button">
       <View style={ui.row}>
         <Badge tone={st.tone}>{st.label}</Badge>
-        {state === 'open' ? <Text style={s.timer}>⏱ {countdown(request.expiresAt, now)}</Text> : <Text style={s.small}>{timeAgo(request.createdAt, now)}</Text>}
+        {state === 'open' ? <View style={s.timerRow}><Icon name="time-outline" size={15} color={colors.blue} /><Text style={s.timer}>{countdown(request.expiresAt, now)}</Text></View> : <Text style={s.small}>{timeAgo(request.createdAt, now)}</Text>}
       </View>
       <Text style={[s.title, { marginTop: 10 }]} numberOfLines={2}>{requestSummary(request) || 'Pedido'}</Text>
-      <Text style={s.small}>📍 {request.colonia} · {FULFILLMENT_MODES[request.fulfillmentMode]?.label}{request.whenText ? ` · ${request.whenText}` : ''}</Text>
+      <IconLine icon="location-outline">{request.colonia} · {FULFILLMENT_MODES[request.fulfillmentMode]?.label}{request.whenText ? ` · ${request.whenText}` : ''}</IconLine>
       {typeof offersCount === 'number' && (
-        <Text style={[s.line, { color: colors.blue, fontWeight: '800' }]}>
+        <Text style={[s.line, { color: colors.blue, fontFamily: fonts.extra }]}>
           {offersCount === 0 ? 'Esperando ofertas…' : `${offersCount} ${offersCount === 1 ? 'oferta recibida' : 'ofertas recibidas'} ›`}
         </Text>
       )}
@@ -113,44 +115,56 @@ export function RequestCard({ request, state, now, offersCount, onPress, footer 
 }
 
 export function OrderRow({ order, role, onPress, now }) {
-  const st = ORDER_STATUS[order.status] || { label: order.status, color: colors.muted };
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [s.card, pressed && { opacity: 0.9 }]} accessibilityRole="button">
       <View style={ui.row}>
         <Text style={s.title} numberOfLines={1}>{role === 'provider' ? order.customerName : order.providerName}</Text>
-        <Text style={[s.status, { color: st.color, borderColor: st.color }]}>{st.label}</Text>
+        <StatusPill status={order.status} />
       </View>
       <Text style={s.line} numberOfLines={2}>{order.details}</Text>
-      <Text style={s.small}>📍 {order.colonia} · {timeAgo(order.createdAt, now)}{typeof order.priceEstimate === 'number' ? ` · ${formatMoney(order.priceEstimate)} aprox.` : ''}</Text>
+      <IconLine icon="location-outline">{bagCode(order.id)} · {order.colonia} · {timeAgo(order.createdAt, now)}{typeof order.priceEstimate === 'number' ? ` · ${formatMoney(order.priceEstimate)} aprox.` : ''}</IconLine>
     </Pressable>
+  );
+}
+
+// Estado del pedido con color e ícono.
+export function StatusPill({ status }) {
+  const st = ORDER_STATUS[status] || { label: status, color: colors.muted, bg: colors.surface, icon: 'ellipse-outline' };
+  return (
+    <View style={[s.statusRow, { backgroundColor: st.bg }]}>
+      <Icon name={st.icon} size={13} color={st.color} />
+      <Text style={[s.status, { color: st.color }]}>{st.label}</Text>
+    </View>
   );
 }
 
 export function StatPill({ value, label, tone = 'info' }) {
   return (
-    <View style={[s.stat, tone === 'success' && { backgroundColor: '#e1f9ed' }]}>
-      <Text style={[s.statValue, tone === 'success' && { color: '#127a4a' }]}>{value}</Text>
+    <View style={[s.stat, tone === 'success' && { backgroundColor: colors.successBg }]}>
+      <Text style={[s.statValue, tone === 'success' && { color: colors.successText }]}>{value}</Text>
       <Text style={s.statLabel}>{label}</Text>
     </View>
   );
 }
 
 const s = StyleSheet.create({
-  card: { backgroundColor: colors.white, borderRadius: 16, padding: 16, marginTop: 12, borderWidth: 1, borderColor: colors.border },
-  cardChosen: { borderColor: '#1fb36b', borderWidth: 2 },
-  title: { fontSize: 16, fontWeight: '800', color: colors.ink, flexShrink: 1 },
-  price: { fontSize: 20, fontWeight: '900', color: colors.blue },
-  line: { fontSize: 14, color: colors.ink, marginTop: 8, lineHeight: 20 },
-  strong: { fontWeight: '800' },
-  msg: { fontSize: 14, color: colors.muted, marginTop: 8, fontStyle: 'italic', lineHeight: 20 },
-  small: { fontSize: 12, color: colors.muted, marginTop: 6 },
-  timer: { fontSize: 13, fontWeight: '800', color: colors.blue },
+  card: { backgroundColor: colors.white, borderRadius: 20, padding: 16, marginTop: 12, borderWidth: 1, borderColor: colors.border, ...shadow },
+  cardChosen: { borderColor: colors.success, borderWidth: 2 },
+  title: { fontSize: 16, fontFamily: fonts.extra, color: colors.ink, flexShrink: 1 },
+  price: { fontSize: 20, fontFamily: fonts.black, color: colors.blue },
+  line: { fontFamily: fonts.regular, fontSize: 14, color: colors.ink, marginTop: 8, lineHeight: 20 },
+  strong: { fontFamily: fonts.extra },
+  msg: { fontFamily: fonts.regular, fontSize: 14, color: colors.muted, marginTop: 8, fontStyle: 'italic', lineHeight: 20 },
+  small: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, marginTop: 6 },
+  timerRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  timer: { fontSize: 13, fontFamily: fonts.extra, color: colors.blue },
   dotRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   dot: { width: 9, height: 9, borderRadius: 5 },
-  status: { fontSize: 11, fontWeight: '800', borderWidth: 1, borderRadius: 20, paddingHorizontal: 8, paddingVertical: 4, overflow: 'hidden' },
-  stat: { flex: 1, backgroundColor: colors.blueSoft, borderRadius: 14, padding: 12 },
-  statValue: { fontSize: 22, fontWeight: '900', color: colors.blue },
-  statLabel: { fontSize: 12, color: colors.muted, marginTop: 2 },
+  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5 },
+  status: { fontSize: 11, fontFamily: fonts.bold },
+  stat: { flex: 1, backgroundColor: colors.surface, borderRadius: 16, padding: 12 },
+  statValue: { fontSize: 22, fontFamily: fonts.black, color: colors.blue },
+  statLabel: { fontFamily: fonts.regular, fontSize: 12, color: colors.muted, marginTop: 2 },
 });
 
 // Selector de fecha y horario: "Lo antes posible" o un día de los próximos 7 + franja.
@@ -179,5 +193,5 @@ export function whenToData(value) {
 
 export function ProviderTypeBadge({ type }) {
   if (!PROVIDER_TYPES[type]) return null;
-  return <Badge tone="info">{PROVIDER_TYPES[type].badge}</Badge>;
+  return <Badge tone="info" icon={PROVIDER_TYPES[type].icon}>{PROVIDER_TYPES[type].badge}</Badge>;
 }

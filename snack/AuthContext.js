@@ -6,6 +6,7 @@ import { onAuthStateChanged } from '@firebase/auth';
 import { doc, onSnapshot } from '@firebase/firestore';
 import { auth, db } from './bubuFirebase';
 import { ensureUserProfile, setActiveMode } from './users';
+import { APP_VARIANT } from './variant';
 
 const AuthContext = createContext(null);
 
@@ -60,7 +61,10 @@ export function AuthProvider({ children }) {
   }, [user]);
 
   const value = useMemo(() => {
-    const mode = profile?.activeMode === 'provider' ? 'provider' : 'client';
+    // En BÜBÜ (clientes) y BÜBÜ Socios el modo es fijo; en la versión completa se elige.
+    const mode = APP_VARIANT === 'socios' ? 'provider'
+      : APP_VARIANT === 'clientes' ? 'client'
+      : (profile?.activeMode === 'provider' ? 'provider' : 'client');
     return {
       loading: user === undefined || (!!user && loadedFor !== user.uid),
       user: user || null,
