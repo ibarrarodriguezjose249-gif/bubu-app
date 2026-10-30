@@ -45,10 +45,15 @@ export function ProfileMissingScreen() {
 }
 
 export function SuspendedScreen() {
+  const { profile } = useAuth();
+  const review = profile?.status === 'review';
   return (
     <Screen>
-      <Text style={styles.title}>Cuenta suspendida</Text>
-      <Notice tone="error">Tu cuenta está suspendida. Contacta al equipo de {BRAND_NAME}.</Notice>
+      <Text style={styles.title}>{review ? 'Cuenta en revisión' : 'Cuenta suspendida'}</Text>
+      <Notice tone={review ? 'warn' : 'error'}>{review
+        ? `El equipo de ${BRAND_NAME} está revisando tu cuenta por una actividad reportada. Mientras tanto no puedes hacer pedidos nuevos. Te contactaremos pronto.`
+        : `Tu cuenta está suspendida. Contacta al equipo de ${BRAND_NAME}.`}</Notice>
+      {!!profile?.statusNote && <Notice tone="info">Nota del equipo: {profile.statusNote}</Notice>}
       <Button title="Cerrar sesión" variant="outline" onPress={() => logout()} />
     </Screen>
   );

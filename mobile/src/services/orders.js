@@ -47,5 +47,20 @@ export function changeOrderStatus(orderId, to, extra = {}) {
   const data = { status: to, statusChangedAt: serverTimestamp(), updatedAt: serverTimestamp() };
   if (extra.cancelReason) data.cancelReason = clampText(extra.cancelReason, 300);
   if (extra.providerPhone) data.providerPhone = normalizePhone(extra.providerPhone);
+  // Al recibir y pesar la ropa: total a pagar (tarjeta o efectivo).
+  if (to === 'in_progress' && extra.amountDue) data.amountDue = Math.round(Number(extra.amountDue) * 100) / 100;
+  if (to === 'in_progress' && extra.transferInfo) data.transferInfo = extra.transferInfo;
+  // Fotos de la bolsa: báscula (obligatoria con el total) y al recolectar (opcional).
+  if (to === 'in_progress' && extra.weightPhotoPath) data.weightPhotoPath = extra.weightPhotoPath;
+  if (to === 'in_progress' && extra.pickupPhotoPath) data.pickupPhotoPath = extra.pickupPhotoPath;
+  // Al entregar: total cobrado y % de comisión vigente (las reglas exigen ambos).
+  if (to === 'delivered') {
+    data.finalPrice = Math.round(Number(extra.finalPrice) * 100) / 100;
+    data.commissionPct = extra.commissionPct;
+    data.commissionIvaPct = extra.commissionIvaPct;
+    if (extra.deliveredBy) data.deliveredBy = extra.deliveredBy;
+    // En efectivo el socio también cobró la cuota de servicio (si se pagó con tarjeta, ya la fijó el servidor).
+    if (typeof extra.serviceFee === 'number') data.serviceFee = extra.serviceFee;
+  }
   return updateDoc(doc(db, 'orders', orderId), data);
 }

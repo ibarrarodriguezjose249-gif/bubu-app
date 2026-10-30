@@ -14,6 +14,8 @@ import { isOnline } from '../../services/providers';
 import { friendlyError } from '../../lib/errors';
 import { LIMITS, validatePhoneOptional } from '../../lib/validation';
 import ColoniaField from '../../components/ColoniaField';
+import LocationField from '../../components/LocationField';
+import { areaCovers } from '../../lib/geo';
 
 export default function DirectBookingScreen({ navigation, route }) {
   const { providerId, categoryId = 'lavanderia' } = route.params || {};
@@ -27,6 +29,7 @@ export default function DirectBookingScreen({ navigation, route }) {
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [loc, setLoc] = useState({ point: null, zone: null, covered: true, configured: false });
   const set = (k) => (v) => setForm((f) => ({ ...f, [k]: v }));
 
   useEffect(() => {
@@ -46,13 +49,16 @@ export default function DirectBookingScreen({ navigation, route }) {
     const details = [form.services.join(', '), form.quantityText, form.description.trim()].filter(Boolean).join(' · ');
     if (details.length < 3) return setError('Cuéntanos qué necesitas.');
     if (form.colonia.trim().length < 2) return setError('Escribe tu colonia.');
+    if (loc.configured && !loc.point) return setError('Indica dónde estás (tu ubicación o un pin en el mapa).');
+    if (loc.configured && !loc.zone) return setError('Aún no llegamos a tu colonia o ciudad.');
+    if (loc.point && provider?.serviceArea && !areaCovers(provider.serviceArea, loc.point)) return setError(`${provider.businessName} no da servicio hasta tu ubicación. Busca otra lavandería más cerca.`);
     if (form.fulfillmentMode === 'pickup_delivery' && form.address.trim().length < 5) return setError('Escribe tu dirección para que pasen por tu ropa.');
     const pErr = validatePhoneOptional(form.customerPhone);
     if (pErr) return setError(pErr);
     setBusy(true);
     setError('');
     try {
-      const ref = await createDirectOrder({ uid: user.uid, profile, provider, f: { ...form, whenText: whenToData(form.when).whenText, details, categoryId, zoneId: profile?.zoneId || 'general-zuazua' } });
+      const ref = await createDirectOrder({ uid: user.uid, profile, provider, f: { ...form, whenText: whenToData(form.when).whenText, details, categoryId, zoneId: loc.zone?.id || profile?.zoneId || 'general-zuazua' } });
       navigation.replace('OrderDetail', { id: ref.id, fresh: true });
     } catch (e) {
       setError(friendlyError(e));
@@ -82,7 +88,8 @@ export default function DirectBookingScreen({ navigation, route }) {
         onChange={set('fulfillmentMode')}
       />
       <Field label="Detalles (opcional)" value={form.description} onChangeText={set('description')} multiline maxLength={LIMITS.description} />
-      <ColoniaField zoneId={profile?.zoneId || 'general-zuazua'} value={form.colonia} onChange={set('colonia')} />
+      <LocationField uid={user?.uid} onResult={setLoc} />
+      <ColoniaField zoneId={loc.zone?.id || profile?.zoneId || 'general-zuazua'} value={form.colonia} onChange={set('colonia')} />
       {form.fulfillmentMode === 'pickup_delivery' && (
         <Field label="Dirección para recoger y entregar" value={form.address} onChangeText={set('address')} maxLength={200} placeholder="Calle, número y referencias" />
       )}

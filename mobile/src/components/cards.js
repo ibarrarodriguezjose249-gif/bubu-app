@@ -12,6 +12,7 @@ import { Badge, Button, Chip, IconLine, styles as ui } from './ui';
 import Icon from './Icon';
 import { RatingBadge, ReviewList } from './Rating';
 import { ratingSummary } from '../services/reviews';
+import { bagCode } from '../services/evidence';
 
 // Grupo de chips: selección única (value) o múltiple (values).
 export function ChipGroup({ options, value, values, onChange, labels }) {
@@ -121,7 +122,7 @@ export function OrderRow({ order, role, onPress, now }) {
         <StatusPill status={order.status} />
       </View>
       <Text style={s.line} numberOfLines={2}>{order.details}</Text>
-      <IconLine icon="location-outline">{order.colonia} · {timeAgo(order.createdAt, now)}{typeof order.priceEstimate === 'number' ? ` · ${formatMoney(order.priceEstimate)} aprox.` : ''}</IconLine>
+      <IconLine icon="location-outline">{bagCode(order.id)} · {order.colonia} · {timeAgo(order.createdAt, now)}{typeof order.priceEstimate === 'number' ? ` · ${formatMoney(order.priceEstimate)} aprox.` : ''}</IconLine>
     </Pressable>
   );
 }

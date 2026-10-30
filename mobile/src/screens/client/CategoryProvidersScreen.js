@@ -6,6 +6,8 @@ import { ProviderCard } from '../../components/cards';
 import { useAuth } from '../../context/AuthContext';
 import { useCatalog } from '../../context/CatalogContext';
 import { isOnline, subscribeApprovedProviders } from '../../services/providers';
+import { areaCovers, distanceKm } from '../../lib/geo';
+import { loadLastPoint } from '../../lib/location';
 import { subscribeReviewsFor } from '../../services/reviews';
 import { useNow } from '../../lib/time';
 import { friendlyError } from '../../lib/errors';
@@ -21,9 +23,14 @@ export default function CategoryProvidersScreen({ navigation, route }) {
 
   useEffect(() => subscribeApprovedProviders(setProviders, (e) => { setError(friendlyError(e)); setProviders([]); }), []);
 
+  const [myPoint, setMyPoint] = useState(null);
+  useEffect(() => { if (user) loadLastPoint(user.uid).then(setMyPoint); }, [user?.uid]);
+  const kmTo = (p) => (p.serviceArea ? distanceKm(myPoint, p.serviceArea) : 9999);
   const list = useMemo(() => (providers || [])
     .filter((p) => p.id !== user?.uid && (p.categoryIds || []).includes(categoryId) && (p.zoneIds || []).includes(zoneId))
-    .sort((a, b) => Number(isOnline(b, now)) - Number(isOnline(a, now))), [providers, categoryId, zoneId, now, user]);
+    .filter((p) => !myPoint || areaCovers(p.serviceArea, myPoint))
+    .sort((a, b) => Number(isOnline(b, now)) - Number(isOnline(a, now))
+      || (myPoint ? kmTo(a) - kmTo(b) : 0)), [providers, categoryId, zoneId, now, user, myPoint]);
 
   // Calificaciones reales de los proveedores de la lista (si falla, no se muestran).
   const [reviewsBy, setReviewsBy] = useState(null);

@@ -38,6 +38,8 @@ export function createRequest(uid, f) {
     categoryId: f.categoryId,
     zoneId: f.zoneId,
     colonia: clampText(f.colonia, 80),
+    // Ubicación APROXIMADA (~1 km): solo para saber qué socios le quedan cerca.
+    ...(f.approxGeo && typeof f.approxGeo.lat === 'number' ? { approxGeo: { lat: f.approxGeo.lat, lng: f.approxGeo.lng } } : {}),
     description: clampText(f.description, 500),
     services: (f.services || []).slice(0, 8),
     quantityText: clampText(f.quantityText, 40),

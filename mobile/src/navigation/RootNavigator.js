@@ -29,6 +29,10 @@ import CategoryProvidersScreen from '../screens/client/CategoryProvidersScreen';
 import DirectBookingScreen from '../screens/client/DirectBookingScreen';
 import OrderDetailScreen from '../screens/common/OrderDetailScreen';
 import MakeOfferScreen from '../screens/provider/MakeOfferScreen';
+import CommissionsScreen from '../screens/provider/CommissionsScreen';
+import PayoutAccountScreen from '../screens/provider/PayoutAccountScreen';
+import OrderChatScreen from '../screens/common/OrderChatScreen';
+import ServiceAreaScreen from '../screens/provider/ServiceAreaScreen';
 import TutorialScreen from '../screens/common/TutorialScreen';
 import { ProfileMissingScreen, SuspendedScreen } from '../screens/common/SystemScreens';
 
@@ -107,7 +111,7 @@ export default function RootNavigator() {
         <Stack.Screen name="ProfileMissing" component={ProfileMissingScreen} options={{ headerShown: false }} />
       </Stack.Navigator>
     );
-  } else if (profile.status === 'suspended') {
+  } else if (profile.status === 'suspended' || profile.status === 'review') {
     content = (
       <Stack.Navigator>
         <Stack.Screen name="Suspended" component={SuspendedScreen} options={{ headerShown: false }} />
@@ -131,6 +135,10 @@ export default function RootNavigator() {
         <Stack.Screen name="DirectBooking" component={DirectBookingScreen} options={{ title: 'Reservar' }} />
         <Stack.Screen name="OrderDetail" component={OrderDetailScreen} options={{ title: 'Pedido' }} />
         <Stack.Screen name="MakeOffer" component={MakeOfferScreen} options={{ title: 'Oferta' }} />
+        <Stack.Screen name="Commissions" component={CommissionsScreen} options={{ title: 'Pagos y comisiones' }} />
+        <Stack.Screen name="PayoutAccount" component={PayoutAccountScreen} options={{ title: 'Cuenta para transferencias' }} />
+        <Stack.Screen name="OrderChat" component={OrderChatScreen} options={{ title: 'Mensajes' }} />
+        <Stack.Screen name="ServiceArea" component={ServiceAreaScreen} options={{ title: 'Zona de servicio' }} />
         <Stack.Screen name="Tutorial" component={TutorialScreen} options={{ headerShown: false, presentation: 'modal' }} />
       </Stack.Navigator>
     );

@@ -5,6 +5,8 @@ import { Text } from 'react-native';
 import { Button, Card, Field, Notice, Screen, styles } from '../../components/ui';
 import { ChipGroup, WhenPicker, whenToData } from '../../components/cards';
 import ColoniaField from '../../components/ColoniaField';
+import LocationField from '../../components/LocationField';
+import { approx } from '../../lib/geo';
 import { useAuth } from '../../context/AuthContext';
 import { useCatalog } from '../../context/CatalogContext';
 import { FULFILLMENT_MODES } from '../../constants/catalog';
@@ -27,6 +29,7 @@ export default function NewRequestScreen({ navigation, route }) {
     colonia: profile?.colonia || '',
     description: '',
   });
+  const [loc, setLoc] = useState({ point: null, zone: null, covered: true, configured: false });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const set = (k) => (v) => setForm((f) => ({ ...f, [k]: v }));
@@ -34,10 +37,13 @@ export default function NewRequestScreen({ navigation, route }) {
   async function submit() {
     if (!form.services.length && form.description.trim().length < 3) return setError('Elige al menos un servicio o describe lo que necesitas.');
     if (form.colonia.trim().length < 2) return setError('Escribe tu colonia para que te encuentren las lavanderías cercanas.');
+    if (loc.configured && !loc.point) return setError('Indica dónde estás (tu ubicación o un pin en el mapa).');
+    if (loc.configured && !loc.zone) return setError('Aún no llegamos a tu colonia o ciudad.');
     setBusy(true);
     setError('');
     try {
-      const ref = await createRequest(user.uid, { ...form, ...whenToData(form.when), categoryId, zoneId: profile?.zoneId || 'general-zuazua' });
+      const zoneId = loc.zone?.id || profile?.zoneId || 'general-zuazua';
+      const ref = await createRequest(user.uid, { ...form, ...whenToData(form.when), categoryId, zoneId, ...(loc.point ? { approxGeo: approx(loc.point) } : {}) });
       navigation.replace('RequestDetail', { id: ref.id, justCreated: true });
     } catch (e) {
       setError(friendlyError(e));
@@ -67,14 +73,15 @@ export default function NewRequestScreen({ navigation, route }) {
         onChange={set('fulfillmentMode')}
       />
 
-      <ColoniaField zoneId={profile?.zoneId || 'general-zuazua'} value={form.colonia} onChange={set('colonia')} hint="Solo se muestra la colonia. Tu dirección y teléfono se comparten únicamente con la lavandería que elijas." />
+      <LocationField uid={user?.uid} onResult={setLoc} />
+      <ColoniaField zoneId={loc.zone?.id || profile?.zoneId || 'general-zuazua'} value={form.colonia} onChange={set('colonia')} hint="Solo se muestra la colonia. Tu dirección y teléfono se comparten únicamente con la lavandería que elijas." />
       <Field label="Detalles (opcional)" value={form.description} onChangeText={set('description')} multiline maxLength={LIMITS.description} placeholder="Ej. ropa de bebé con jabón neutro, 2 cobijas matrimoniales…" />
 
       <Card>
         <Text style={styles.text}>BÜBÜ no cobra dentro de la app. El precio de cada oferta es un estimado y el pago se acuerda directo con la lavandería.</Text>
       </Card>
       <Notice tone="error">{error}</Notice>
-      <Button title="Publicar y recibir ofertas" onPress={submit} loading={busy} />
+      <Button title="Publicar y recibir ofertas" onPress={submit} loading={busy} disabled={loc.configured && !!loc.point && !loc.zone} />
     </Screen>
   );
 }

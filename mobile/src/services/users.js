@@ -10,6 +10,7 @@ import {
 import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import { clampText, normalizePhone, LIMITS } from '../lib/validation';
+import { unregisterPushToken } from '../lib/notifications';
 
 export const DEFAULT_ZONE_ID = 'general-zuazua';
 
@@ -50,7 +51,9 @@ export function resendVerification() {
   return auth.currentUser ? sendEmailVerification(auth.currentUser) : Promise.resolve();
 }
 
-export function logout() {
+export async function logout() {
+  // Primero se borra el aviso de este teléfono (después ya no habría permiso).
+  if (auth.currentUser) await unregisterPushToken(auth.currentUser.uid);
   return signOut(auth);
 }
 

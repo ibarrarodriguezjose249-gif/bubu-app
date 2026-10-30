@@ -31,6 +31,9 @@ import { BRAND_NAME, colors, fonts } from '../../constants/brand';
 import { countdown, toMillis, timeAgo, useNow } from '../../lib/time';
 import { friendlyError } from '../../lib/errors';
 import { keepScreenOn } from '../../lib/keepAwake';
+import { notifyLocal, openNotificationSettings, registerPushToken } from '../../lib/notifications';
+import { money2, subscribeMyDebtBlock } from '../../services/commission';
+import { areaCovers, coverageConfigured } from '../../lib/geo';
 
 const ACTIVE_ORDER = ['requested', 'accepted', 'in_progress', 'ready'];
 const vibrate = (pattern) => { try { Vibration.vibrate(pattern); } catch (e) { /* sin vibración */ } };
@@ -75,7 +78,7 @@ function elapsed(ms) {
 
 export default function ProviderHomeScreen({ navigation }) {
   const { user, provider, profile } = useAuth();
-  const { zoneById } = useCatalog();
+  const { zoneById, zones } = useCatalog();
   const [accepting, setAccepting] = useState('');
   const [modeOpen, setModeOpen] = useState(false);
   const [requests, setRequests] = useState([]);
@@ -92,20 +95,45 @@ export default function ProviderHomeScreen({ navigation }) {
   const now = useNow(1000);
   const focused = useIsFocused();
   const approved = provider?.status === 'approved';
+  // Bloqueo por adeudo (lo pone el servidor): no ve ni recibe pedidos nuevos hasta pagar.
+  const [debtBlock, setDebtBlock] = useState(null);
+  useEffect(() => (approved && user ? subscribeMyDebtBlock(user.uid, setDebtBlock) : undefined), [approved, user?.uid]);
+  const blocked = !!debtBlock;
   const available = !!provider?.isAvailable;
   const checked = useRef(new Set());
   const lastIncoming = useRef('');
+  const knownOrders = useRef(null); // ids de pedidos ya vistos (para avisar de reservas nuevas)
+  const [pushPermission, setPushPermission] = useState('');
   const celebrateKey = user ? `bubu:celebrated:${user.uid}` : '';
 
   // Pedidos de mi zona (abiertos y pasados).
   useEffect(() => {
-    if (!approved) return undefined;
+    if (!approved || blocked) { setRequests([]); return undefined; }
     return subscribeZoneRequests(provider, setRequests, (e) => setError(friendlyError(e)));
-  }, [approved, provider?.categoryIds?.join(), provider?.zoneIds?.join()]);
+  }, [approved, blocked, provider?.categoryIds?.join(), provider?.zoneIds?.join()]);
 
   // Mis pedidos como proveedor (en curso, entregados hoy) y mis calificaciones.
   useEffect(() => (approved && user ? subscribeMyOrders(user.uid, 'provider', setOrders, () => {}) : undefined), [approved, user]);
   useEffect(() => (approved && user ? subscribeMyProviderReviews(user.uid, setReviews, () => setReviews(null)) : undefined), [approved, user]);
+
+  // Avisos al teléfono: pide permiso y guarda el token para las notificaciones push.
+  useEffect(() => {
+    if (!approved || !user) return;
+    registerPushToken(user.uid).then((r) => setPushPermission(r.permission)).catch(() => {});
+  }, [approved, user?.uid]);
+
+  // Reserva directa nueva (un cliente me eligió sin pasar por oferta): suena.
+  useEffect(() => {
+    const ids = new Set(orders.map((o) => o.id));
+    if (knownOrders.current) {
+      const fresh = orders.find((o) => o.status === 'requested' && !knownOrders.current.has(o.id));
+      if (fresh) {
+        vibrate([0, 400, 200, 400]);
+        notifyLocal({ title: 'Nueva reserva', body: `Un cliente te reservó en ${fresh.colonia || 'tu zona'}. Acepta o rechaza.`, data: { type: 'direct_order', orderId: fresh.id } });
+      }
+    }
+    knownOrders.current = ids;
+  }, [orders]);
 
   // Mis ofertas: se consulta una vez por pedido reciente.
   useEffect(() => {
@@ -139,29 +167,34 @@ export default function ProviderHomeScreen({ navigation }) {
       .catch(() => setCelebrated(new Set()));
   }, [celebrateKey]);
 
+  // Solo pedidos dentro de su zona de servicio (si la marcó en el mapa).
+  const nearRequests = useMemo(() => requests.filter((r) => areaCovers(provider?.serviceArea, r.approxGeo)), [requests, provider?.serviceArea]);
   const groups = useMemo(() => {
     const weekAgo = now - MISSED_WINDOW_DAYS * 86400000;
     const mine = (r) => r.customerId === user?.uid;
-    const open = requests.filter((r) => !mine(r) && requestState(r, now) === 'open');
+    const open = nearRequests.filter((r) => !mine(r) && requestState(r, now) === 'open');
     const won = requests.filter((r) => r.status === 'assigned' && r.chosenProviderId === user?.uid);
-    const recent = requests.filter((r) => !mine(r) && toMillis(r.createdAt) > weekAgo);
+    const recent = nearRequests.filter((r) => !mine(r) && toMillis(r.createdAt) > weekAgo);
     const takenByOthers = recent.filter((r) => r.status === 'assigned' && r.chosenProviderId !== user?.uid);
     const expiredNoChoice = recent.filter((r) => requestState(r, now) === 'expired');
     const missed = [...takenByOthers, ...expiredNoChoice].filter((r) => !myOffers[r.id]);
     const lostWithOffer = takenByOthers.filter((r) => myOffers[r.id]);
     return { open, won, missed, takenByOthers: takenByOthers.filter((r) => !myOffers[r.id]), expiredNoChoice: expiredNoChoice.filter((r) => !myOffers[r.id]), lostWithOffer };
-  }, [requests, now, user, myOffers]);
+  }, [nearRequests, requests, now, user, myOffers]);
 
   const canServe = (r) => (provider?.fulfillmentModes || []).includes(r.fulfillmentMode);
 
   // Pedido que "sube" en pantalla: abierto, que puedo atender, sin oferta mía y no descartado.
   // La vibración avisa aunque estés en otra pantalla; la tarjeta se muestra al estar en Inicio.
-  const incomingAny = available && approved
+  const incomingAny = available && approved && !blocked
     ? groups.open.find((r) => canServe(r) && offerChecked[r.id] && !myOffers[r.id] && !dismissed[r.id])
     : null;
   const incoming = focused && !modeOpen ? incomingAny : null;
   useEffect(() => {
-    if (incomingAny && incomingAny.id !== lastIncoming.current) vibrate([0, 400, 200, 400]);
+    if (incomingAny && incomingAny.id !== lastIncoming.current) {
+      vibrate([0, 400, 200, 400]);
+      notifyLocal({ title: 'Nuevo pedido en tu zona', body: `${requestSummary(incomingAny) || 'Pedido'} · ${incomingAny.colonia || ''}`.trim(), data: { type: 'new_request', requestId: incomingAny.id } });
+    }
     lastIncoming.current = incomingAny ? incomingAny.id : '';
   }, [incomingAny?.id]);
 
@@ -172,7 +205,11 @@ export default function ProviderHomeScreen({ navigation }) {
       && orders.some((o) => o.id === r.orderId && ACTIVE_ORDER.includes(o.status)))
     : null;
   const chosen = focused && !modeOpen ? chosenAny : null;
-  useEffect(() => { if (chosenAny) vibrate([0, 200, 100, 200, 100, 500]); }, [chosenAny?.id]);
+  useEffect(() => {
+    if (!chosenAny) return;
+    vibrate([0, 200, 100, 200, 100, 500]);
+    notifyLocal({ title: '¡Te eligieron!', body: 'El cliente eligió tu oferta. Abre el pedido para ver los datos.', data: { type: 'chosen', orderId: chosenAny.orderId } });
+  }, [chosenAny?.id]);
   function closeChosen(goToOrder) {
     const r = chosen;
     const next = new Set(celebrated);
@@ -254,7 +291,7 @@ export default function ProviderHomeScreen({ navigation }) {
   );
 
   // ───────────── CONECTADO: radar ─────────────
-  if (approved && available) {
+  if (approved && available && !blocked) {
     const others = groups.open.filter((r) => !incoming || r.id !== incoming.id);
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: colors.navy }} edges={['top']}>
@@ -274,6 +311,11 @@ export default function ProviderHomeScreen({ navigation }) {
           <View style={styles.page}>
             {ordersBar}
             <Notice tone="error">{error}</Notice>
+            {pushPermission === 'denied' && (
+              <Pressable onPress={openNotificationSettings}>
+                <Notice tone="warn">Las notificaciones están apagadas: no te sonarán los pedidos. Toca aquí para activarlas en Ajustes.</Notice>
+              </Pressable>
+            )}
             {wonActive.length > 0 && (
               <Pressable onPress={() => navigation.navigate('OrderDetail', { id: wonActive[0].orderId })} style={s.wonBar}>
                 <Icon name="trophy-outline" size={18} color={colors.white} /><Text style={s.wonText}>Te eligieron en {wonActive.length} {wonActive.length === 1 ? 'pedido en curso' : 'pedidos en curso'} · ver el último ›</Text>
@@ -288,10 +330,10 @@ export default function ProviderHomeScreen({ navigation }) {
                 ))}
               </>
             )}
-            {groups.open.length === 0 && <Text style={s.onHint}>Cuando un cliente de tu zona publique un pedido, aparecerá aquí y tu teléfono vibrará. Mantén la app abierta.</Text>}
+            {groups.open.length === 0 && <Text style={s.onHint}>Cuando un cliente de tu zona publique un pedido, aparecerá aquí y te sonará el teléfono.</Text>}
             {missedCard}
             <Button title="Desconectarme" variant="light" onPress={() => toggle(false)} loading={toggling} style={{ marginTop: 26 }} />
-            <Text style={[styles.disclaimer, { color: '#8fa9cc' }]}>Solo recibes avisos con la app abierta. {BRAND_NAME} no procesa pagos.</Text>
+            <Text style={[styles.disclaimer, { color: '#8fa9cc' }]}>Te avisamos mientras estés Conectado. Desconéctate para dejar de recibir pedidos. {BRAND_NAME} no procesa pagos.</Text>
           </View>
         </ScrollView>
 
@@ -348,7 +390,18 @@ export default function ProviderHomeScreen({ navigation }) {
           onModePress={() => setModeOpen(true)}
         />
         <View style={styles.page}>
-          {approved && (
+          {approved && !provider?.serviceArea && coverageConfigured(zones) && (
+            <Notice tone="info">Marca tu zona de servicio en el mapa para recibir solo pedidos que te quedan cerca. Perfil → Mi zona de servicio.</Notice>
+          )}
+          {approved && blocked && (
+            <Card style={{ borderColor: colors.errorText }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}><Icon name="lock-closed-outline" size={20} color={colors.errorText} /><Text style={styles.section}>Tienes un adeudo con BÜBÜ</Text></View>
+              <Text style={[styles.title, { color: colors.errorText, marginTop: 6 }]}>{money2(debtBlock.debt)}</Text>
+              <Text style={styles.muted}>Son comisiones de pedidos cobrados en efectivo y pasaste el límite de {money2(debtBlock.debtLimit)}. Mientras tanto no te llegan pedidos nuevos; los que ya tienes sí los puedes terminar. Págalo al equipo de BÜBÜ y se desbloquea solo.</Text>
+              <Button icon="cash-outline" title="Ver mis pagos y comisiones" variant="outline" onPress={() => navigation.navigate('Commissions')} />
+            </Card>
+          )}
+          {approved && !blocked && (
             <View style={{ alignItems: 'center', marginTop: 4 }}>
               <Pressable onPress={() => toggle(true)} disabled={toggling} accessibilityRole="button" accessibilityLabel="Conectarme"
                 style={({ pressed }) => [s.goBtn, pressed && { transform: [{ scale: 0.96 }] }, toggling && { opacity: 0.6 }]}>

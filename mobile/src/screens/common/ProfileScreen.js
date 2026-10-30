@@ -68,6 +68,13 @@ export default function ProfileScreen({ navigation }) {
         {CAN_SWITCH_MODE
           ? <MenuItem icon="swap-horizontal-outline" title="Cambiar de modo" subtitle={mode === 'provider' ? 'Ahora: ofrecer servicios' : 'Ahora: contratar servicios'} onPress={() => setModeOpen(true)} />
           : <MenuItem icon={IS_SOCIOS ? 'bag-handle-outline' : 'briefcase-outline'} title={IS_SOCIOS ? '¿Quieres pedir un servicio?' : '¿Ofreces servicios?'} subtitle={IS_SOCIOS ? 'Usa la app BÜBÜ con esta misma cuenta' : `Usa la app ${SOCIOS_APP_NAME} con esta misma cuenta`} onPress={() => setModeOpen(true)} />}
+        {provider?.status === 'approved' && (mode === 'provider' || IS_SOCIOS) && (
+          <>
+            <MenuItem icon="cash-outline" title="Pagos y comisiones" subtitle="Tu corte semanal y tu saldo con BÜBÜ" onPress={() => navigation.navigate('Commissions')} />
+            <MenuItem icon="swap-horizontal-outline" title="Cuenta para transferencias" subtitle="Para que tus clientes te paguen directo" onPress={() => navigation.navigate('PayoutAccount')} />
+            <MenuItem icon="map-outline" title="Mi zona de servicio" subtitle="Tu punto en el mapa y hasta cuántos km atiendes" onPress={() => navigation.navigate('ServiceArea')} />
+          </>
+        )}
         <MenuItem icon="help-circle-outline" title="Ayuda: ver tutorial" subtitle={mode === 'provider' ? 'Cómo funciona el modo proveedor' : 'Cómo pedir un servicio'} onPress={() => navigation.navigate('Tutorial', { mode, manual: true })} last={!isAdmin} />
         {isAdmin && <MenuItem icon="shield-checkmark-outline" title="Herramientas de administrador" subtitle="La gestión completa está en el panel web" onPress={() => navigation.navigate('AdminTools')} last />}
       </Card>

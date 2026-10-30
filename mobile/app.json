@@ -3,7 +3,7 @@
     "name": "BÜBÜ",
     "slug": "bubu-servicios",
     "scheme": "bubu",
-    "version": "0.3.0",
+    "version": "0.4.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -19,7 +19,7 @@
     },
     "android": {
       "package": "com.joseibarra.bubu",
-      "versionCode": 2,
+      "versionCode": 3,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0066FF"
@@ -49,6 +49,30 @@
       "eas": {
         "projectId": "46983f8f-ae6c-4e8e-a411-c67c03ad6ee4"
       }
-    }
+    },
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#0066FF",
+          "defaultChannel": "pedidos"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "BÜBÜ usa tus fotos solo para adjuntar el comprobante de tu transferencia o la foto de la bolsa del pedido.",
+          "cameraPermission": "BÜBÜ usa la cámara solo para tomar la foto de la bolsa cerrada del pedido (báscula, recolección y entrega).",
+          "microphonePermission": false
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "BÜBÜ usa tu ubicación para encontrar lavanderías cerca de ti y saber si hay servicio en tu zona."
+        }
+      ]
+    ]
   }
 }
